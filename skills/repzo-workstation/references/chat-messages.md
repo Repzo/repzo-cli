@@ -1,6 +1,6 @@
 # Chat Messages
 
-Use this reference for Chat reads, sends, rich formatting, buttons, native structured messages, and thread replies.
+Use this reference for Chat reads, sends, Markdown, Slack-style structured messages, buttons, and thread replies.
 
 ## Contents
 
@@ -8,12 +8,10 @@ Use this reference for Chat reads, sends, rich formatting, buttons, native struc
 - [Message fields](#message-fields)
 - [Plain text](#plain-text)
 - [Markdown announcement](#markdown-announcement)
-- [HTML announcement with a button](#html-announcement-with-a-button)
-- [Native code snippet](#native-code-snippet)
-- [Native poll](#native-poll)
+- [Structured announcement with a button](#structured-announcement-with-a-button)
+- [Supported Slack blocks](#supported-slack-blocks)
 - [Thread reply](#thread-reply)
 - [Idempotent send](#idempotent-send)
-- [Slack Block Kit boundary](#slack-block-kit-boundary)
 
 ## Safe send workflow
 
@@ -33,13 +31,13 @@ For complex JSON, put the payload in a temporary `message.json` file so shell qu
 
 | Field | Shape | Use |
 | --- | --- | --- |
-| `body` | string, at most 100,000 characters | Message text or HTML. Use `body`, never `content`. |
-| `bodyFormat` | `plain`, `md`, or `html` | Select rendering explicitly. If omitted, the server currently defaults to `html`. |
-| `blocksJson` | object or `null` | Native Chat structures such as `poll` or `snippets`; it is not a Slack Block Kit array. |
+| `body` | string, at most 100,000 characters | Plain text or Markdown. Use `body`, never `content`. |
+| `bodyFormat` | `plain` or `md` | Select rendering explicitly. If omitted, the server defaults to `plain`. Raw HTML is rejected. |
+| `blocks` | array of 1-50 objects | Slack-style `header`, `section`, `divider`, `context`, `image`, or `actions` blocks. |
 | `parentMessageId` | UUID | Post a reply under an existing message. |
 | `clientMessageId` | UUID | Make retries idempotent within the workspace. |
 
-Provide a non-empty `body` or a non-null `blocksJson`. The request is strict: do not add undocumented top-level fields.
+Provide a non-empty `body` or a non-empty `blocks` array. The request is strict: do not send internal `blocksJson` metadata or undocumented top-level fields.
 
 ## Plain text
 
@@ -65,68 +63,50 @@ Use Markdown for headings, lists, emphasis, and ordinary links.
 }
 ```
 
-## HTML announcement with a button
+## Structured announcement with a button
 
-Use HTML when the user asks for a button. The Chat UI recognizes `bot-actions`, `bot-button`, `bot-button-primary`, and `bot-button-danger`. Use an absolute `http://` or `https://` deal URL. Escape any untrusted text before interpolating it into HTML or attributes.
-
-```json
-{
-  "body": "<div class=\"bot-section\"><p><strong>Deal closed</strong></p><p>Acme — $25,000</p><div class=\"bot-actions\"><a class=\"bot-button bot-button-primary\" href=\"https://workstation.example.com/deals/DEAL_ID\" target=\"_blank\" rel=\"noopener\">Open deal</a></div></div>",
-  "bodyFormat": "html"
-}
-```
-
-This is an HTML message, not a `blocksJson` message. Preserve a meaningful text summary in the body so notifications remain understandable.
-
-## Native code snippet
-
-Use `blocksJson.snippets` for a Chat code card. Each snippet needs a stable `id`, `title`, `content`, and a language name or `null`.
+Use Slack-style blocks when the user asks for a button. Put the human-readable announcement in a section and the link in an actions block. Use an absolute `http://` or `https://` URL.
 
 ```json
 {
-  "body": "Payload used for the deal event:",
-  "bodyFormat": "plain",
-  "blocksJson": {
-    "snippets": [
-      {
-        "id": "deal-event-example",
-        "title": "deal.closed.json",
-        "content": "{\n  \"dealId\": \"DEAL_ID\",\n  \"status\": \"closed\"\n}",
-        "language": "json"
-      }
-    ]
-  }
-}
-```
-
-Do not invent file or voice-message metadata. Their native shapes require media created by the upload flow.
-
-## Native poll
-
-```json
-{
-  "body": "",
-  "blocksJson": {
-    "poll": {
-      "question": "When should we launch?",
-      "description": "Choose one date.",
-      "options": [
-        { "id": "monday", "text": "Monday" },
-        { "id": "tuesday", "text": "Tuesday" }
-      ],
-      "showWhoVoted": true,
-      "allowMultipleAnswers": false,
-      "allowAddingOptions": false,
-      "allowRevoting": true,
-      "correctOptionIds": [],
-      "durationHours": 24,
-      "hideResultsUntilClosed": false
+  "blocks": [
+    {
+      "type": "header",
+      "text": { "type": "plain_text", "text": "Deal closed" }
+    },
+    {
+      "type": "section",
+      "text": { "type": "mrkdwn", "text": "*Acme* — $25,000" }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": { "type": "plain_text", "text": "Open deal" },
+          "url": "https://workstation.example.com/deals/DEAL_ID",
+          "style": "primary"
+        }
+      ]
     }
-  }
+  ]
 }
 ```
 
-Require a question and 2-10 uniquely named options with unique IDs. Set a positive `durationHours` to close automatically. Setting `hideResultsUntilClosed` to `true` requires a positive duration. A single-answer poll can have at most one `correctOptionIds` entry. Send polls only as top-level messages in public or private channels, never in direct messages or threads.
+Preview the payload before sending, then verify the returned message in the channel.
+
+## Supported Slack blocks
+
+The public Chat endpoint renders these Block Kit-compatible types:
+
+- `header`: a `plain_text` or `mrkdwn` text object.
+- `section`: one text object, optional fields, and an optional image or button accessory.
+- `divider`: a visual separator.
+- `context`: text and image elements.
+- `image`: `image_url`, `alt_text`, and optional title.
+- `actions`: button elements with optional `url`, `style: "primary"`, or `style: "danger"`.
+
+Prefer `plain_text` for labels and `mrkdwn` for message content. Do not send interactive action IDs: public Chat buttons are links, not callbacks. Do not invent internal poll, snippet, file, voice, or approval metadata under `blocksJson`.
 
 ## Thread reply
 
@@ -140,7 +120,7 @@ Read the channel first and use the exact parent message UUID.
 }
 ```
 
-Do not attach a poll to a thread reply.
+Use `blocks` instead of `body` when a thread reply needs structured content.
 
 ## Idempotent send
 
@@ -155,9 +135,3 @@ Generate one UUID for the intended message and keep it unchanged if the request 
 ```
 
 Generate a new UUID for a genuinely new message.
-
-## Slack Block Kit boundary
-
-Do not pass a top-level Slack `blocks` array, or put a Slack array inside `blocksJson`, when using `repzo chat send`. The delegated `/api/v1/chat` endpoint accepts `blocksJson` as an object but does not run the Slack Block Kit renderer.
-
-The separate Integration Bot API understands Slack-style `header`, `section`, `divider`, `context`, `image`, and `actions` blocks, including `primary` and `danger` buttons. That API uses Integration App authentication and is not the delegated CLI Chat contract. Do not call it through this CLI workflow unless it becomes part of the public OpenAPI surface and the active credential has the required Integration App scopes.

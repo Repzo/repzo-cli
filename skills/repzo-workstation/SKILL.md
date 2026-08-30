@@ -50,7 +50,7 @@ Read only the references needed for the task:
 - Contacts, accounts, deals, activities, tags, or associations: [references/crm-records.md](references/crm-records.md)
 - Products, pipelines, stages, price offers, carts, orders, invoices, or line items: [references/sales-commerce.md](references/sales-commerce.md)
 - Tickets, projects, appointments, request types, or request approvals: [references/service-operations.md](references/service-operations.md)
-- Chat messages, rich formatting, buttons, polls, snippets, threads, or idempotent sends: [references/chat-messages.md](references/chat-messages.md)
+- Chat messages, Markdown, Slack-style structured blocks, buttons, threads, or idempotent sends: [references/chat-messages.md](references/chat-messages.md)
 - Inbox, voice, Send, or event subscriptions: [references/communications.md](references/communications.md)
 - Campaigns, forms, segments, collections, or articles: [references/marketing-content.md](references/marketing-content.md)
 - Saved reports, report execution, imports, or exports: [references/reporting-data.md](references/reporting-data.md)

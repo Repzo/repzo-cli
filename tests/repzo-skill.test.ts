@@ -49,14 +49,13 @@ describe("Repzo Workstation skill package", () => {
 
 		const chatMessages = documents[0];
 		expect(chatMessages).toMatch(/"bodyFormat"\s*:\s*"md"/);
-		expect(chatMessages).toContain(`"blocksJson"`);
-		expect(chatMessages).toContain(`"poll"`);
-		expect(chatMessages).toContain(`"snippets"`);
+		expect(chatMessages).toContain(`"blocks"`);
+		expect(chatMessages).toContain(`"actions"`);
+		expect(chatMessages).toContain(`"button"`);
 		expect(chatMessages).toContain(`"parentMessageId"`);
 		expect(chatMessages).toContain(`"clientMessageId"`);
-		expect(chatMessages).toContain("bot-button bot-button-primary");
-		expect(chatMessages).toContain(
-			"Do not pass a top-level Slack `blocks` array",
-		);
+		expect(chatMessages).toContain(`"style": "primary"`);
+		expect(chatMessages).toContain("Raw HTML is rejected");
+		expect(chatMessages).toContain("do not send internal `blocksJson`");
 	});
 });
