@@ -16,7 +16,7 @@ describe("Repzo Workstation skill package", () => {
 		const result = await runScript("scripts/generate-embedded-skill.mjs", [
 			"--check",
 		]);
-		expect(result.stdout).toContain("Embedded Repzo skill matches");
+		expect(result.stdout).toContain("Embedded Repzo skills match");
 	});
 
 	it("documents only live CLI commands and flags", async () => {

@@ -171,6 +171,19 @@ describe("Repzo CLI v2", () => {
 					command: "exports create",
 					path: "/data/exports",
 				}),
+				expect.objectContaining({
+					command: "agents get",
+					path: "/agents/{id}",
+				}),
+				expect.objectContaining({
+					command: "agents publish",
+					path: "/agents/{id}/publish",
+					mutation: true,
+				}),
+				expect.objectContaining({
+					command: "agents test messages",
+					pagination: "cursor",
+				}),
 			]),
 		);
 		expect(
@@ -557,7 +570,7 @@ describe("Repzo CLI v2", () => {
 		expect(JSON.parse(result.stdout).data.baseUrl).toBe(apiRoot);
 	});
 
-	it("installs one shared skill and links Codex and Claude to it", async () => {
+	it("installs both shared skills and links Codex and Claude to them", async () => {
 		for (const target of ["codex", "claude"] as const) {
 			const targetHome = await mkdtemp(join(tmpdir(), `repzo-${target}-`));
 			const agentsHome = await mkdtemp(join(tmpdir(), "repzo-agents-"));
@@ -568,8 +581,13 @@ describe("Repzo CLI v2", () => {
 			expect(result.code).toBe(0);
 			const agentSkill = join(targetHome, "skills", "repzo-workstation");
 			const sharedSkill = join(agentsHome, "skills", "repzo-workstation");
+			const aiAgentSkill = join(targetHome, "skills", "repzo-ai-agents");
+			const sharedAiAgentSkill = join(agentsHome, "skills", "repzo-ai-agents");
 			expect((await lstat(agentSkill)).isSymbolicLink()).toBe(true);
 			expect(await realpath(agentSkill)).toBe(await realpath(sharedSkill));
+			expect((await lstat(aiAgentSkill)).isSymbolicLink()).toBe(true);
+			expect(await realpath(aiAgentSkill)).toBe(await realpath(sharedAiAgentSkill));
+			expect(await readFile(join(aiAgentSkill, "SKILL.md"), "utf8")).toContain("name: repzo-ai-agents");
 			expect(await readFile(join(agentSkill, "SKILL.md"), "utf8")).toContain(
 				"name: repzo-workstation",
 			);
@@ -578,7 +596,7 @@ describe("Repzo CLI v2", () => {
 			).resolves.toBeUndefined();
 			expect(
 				await readFile(join(sharedSkill, ".installed-version"), "utf8"),
-			).toBe("1.0.6\n");
+			).toBe("1.0.7\n");
 		}
 	});
 
@@ -601,6 +619,10 @@ describe("Repzo CLI v2", () => {
 		for (const agentHome of [codexHome, claudeHome])
 			await expect(
 				access(join(agentHome, "skills", "repzo-workstation", "SKILL.md")),
+			).resolves.toBeUndefined();
+		for (const agentHome of [codexHome, claudeHome])
+			await expect(
+				access(join(agentHome, "skills", "repzo-ai-agents", "SKILL.md")),
 			).resolves.toBeUndefined();
 	});
 
@@ -626,7 +648,7 @@ describe("Repzo CLI v2", () => {
 		expect(refreshed.code).toBe(0);
 		expect(
 			await readFile(join(sharedSkill, ".installed-version"), "utf8"),
-		).toBe("1.0.6\n");
+		).toBe("1.0.7\n");
 		expect(await readFile(join(sharedSkill, "SKILL.md"), "utf8")).toContain(
 			"Operate Workstation through the `repzo` CLI",
 		);
@@ -649,6 +671,8 @@ describe("Repzo CLI v2", () => {
 			expect.arrayContaining([
 				expect.objectContaining({ name: "Agent skill (shared)", ok: true }),
 				expect.objectContaining({ name: "Agent skill (codex)", ok: true }),
+				expect.objectContaining({ name: "Agent skill (repzo-ai-agents shared)", ok: true }),
+				expect.objectContaining({ name: "Agent skill (repzo-ai-agents codex)", ok: true }),
 			]),
 		);
 	});

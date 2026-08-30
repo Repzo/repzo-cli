@@ -24,6 +24,11 @@ repzo auth login
 repzo doctor
 ```
 
+Setup installs two managed skills into detected Codex and Claude homes:
+
+- `$repzo-workstation` for CRM, Inbox, chat, commerce, content, and reporting.
+- `$repzo-ai-agents` for Playbook, Knowledge, publishing, and isolated end-to-end agent tests.
+
 Node and npm are not required. The installer downloads the standalone binary for your platform and verifies its SHA-256 checksum. When `cosign` is installed, it also verifies the release's keyless Sigstore signature.
 
 ## Use
@@ -41,6 +46,8 @@ Examples:
 repzo contacts list --limit 20
 repzo deals get DEAL_ID
 repzo chat send CHANNEL_ID --data '{"body":"Hello","bodyFormat":"plain"}' --dry-run
+repzo agents get AGENT_ID --json
+repzo agents test start AGENT_ID --data '{"sideEffects":"simulate"}' --dry-run
 ```
 
 The CLI defaults to `https://workstation.repzo.com`. Use `--base-url` or `REPZO_BASE_URL` for a different deployment. Mutations require either `--dry-run` or `--yes`. Credentials are accepted through browser login, stdin, or environment variables—never command-line arguments.
@@ -58,7 +65,7 @@ repzo upgrade --yes
 repzo doctor
 ```
 
-The upgraded CLI refreshes installed agent skills automatically. Start a new agent thread afterward so it loads the refreshed skill.
+The upgraded CLI refreshes both installed agent skills automatically. Start a new agent thread afterward so it loads the refreshed skills.
 
 See [Releases](https://github.com/Repzo/repzo-cli/releases) for checksummed binaries for macOS, Linux, and Windows.
 
