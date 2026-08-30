@@ -1,0 +1,29 @@
+{
+  "name": "repzo-cli",
+  "version": "1.0.1",
+  "private": true,
+  "description": "Official standalone CLI for Repzo Workstation and AI agents.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "repzo": "node bin/repzo.mjs",
+    "build": "npm run skill:embed && node scripts/build-standalone.mjs",
+    "build:standalone": "npm run build",
+    "skill:embed": "node scripts/generate-embedded-skill.mjs",
+    "skill:embed:check": "node scripts/generate-embedded-skill.mjs --check",
+    "skill:check": "npm run skill:embed:check && node scripts/check-repzo-skill-drift.mjs && node skill-evals/run.mjs --validate",
+    "test": "vitest run",
+    "check": "npm run skill:check && npm test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Repzo/repzo-cli.git"
+  },
+  "devDependencies": {
+    "express": "^5.2.1",
+    "vitest": "^4.1.0"
+  }
+}
