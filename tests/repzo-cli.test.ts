@@ -28,6 +28,7 @@ async function runCli(
 					env: {
 						...process.env,
 						REPZO_DISABLE_SKILL_REFRESH: "1",
+						REPZO_CREDENTIAL_BACKEND: "file",
 						...options.env,
 					},
 					stdio: "pipe",
@@ -91,6 +92,82 @@ describe("Repzo CLI v2", () => {
 					path: "/chat/channels/{channelId}/messages",
 				}),
 				expect.objectContaining({
+					command: "chat users list",
+					path: "/chat/users",
+					pagination: "offset",
+				}),
+				expect.objectContaining({
+					command: "chat channels direct",
+					path: "/chat/channels/direct",
+					mutation: true,
+				}),
+			expect.objectContaining({
+					command: "chat members list",
+					path: "/chat/channels/{channelId}/members",
+				}),
+				expect.objectContaining({
+					command: "reports execute",
+					method: "POST",
+					mutation: false,
+				}),
+				expect.objectContaining({
+					command: "metadata tax-rates",
+					path: "/metadata/tax-rates",
+				}),
+				expect.objectContaining({
+					command: "metadata properties",
+					path: "/metadata/properties/{entityType}",
+				}),
+				expect.objectContaining({
+					command: "search records",
+					path: "/search",
+				}),
+				expect.objectContaining({
+					command: "timeline list",
+					path: "/timeline",
+				}),
+				expect.objectContaining({
+					command: "comments list",
+					pagination: "offset",
+				}),
+				expect.objectContaining({
+					command: "comments create",
+					path: "/comments/{entityType}/{entityId}",
+					mutation: true,
+				}),
+				expect.objectContaining({
+					command: "notifications list",
+					pagination: "offset",
+				}),
+				expect.objectContaining({
+					command: "notifications unread-count",
+					path: "/notifications/unread-count",
+				}),
+				expect.objectContaining({
+					command: "approvals pending",
+					path: "/approvals/pending",
+					pagination: "offset",
+				}),
+				expect.objectContaining({
+					command: "media list",
+					pagination: "offset",
+				}),
+				expect.objectContaining({
+					command: "media upload",
+					path: "/media/{entityType}/{entityId}",
+					requiresFile: true,
+				}),
+				expect.objectContaining({
+					command: "price-offers items replace",
+					path: "/price-offers/{id}/items",
+					mutation: true,
+				}),
+				expect.objectContaining({
+					command: "invoices void",
+					path: "/invoices/{id}/void",
+					mutation: true,
+				}),
+				expect.objectContaining({
 					command: "exports create",
 					path: "/data/exports",
 				}),
@@ -98,7 +175,13 @@ describe("Repzo CLI v2", () => {
 		);
 		expect(
 			commands.some((entry: any) => entry.command === "imports create"),
-		).toBe(false);
+		).toBe(true);
+		expect(commands.some((entry: any) => entry.command === "events types")).toBe(false);
+		expect(commands).toEqual(expect.arrayContaining([
+			expect.objectContaining({ command: "imports upload", requiresFile: true }),
+			expect.objectContaining({ command: "imports validate", mutation: false }),
+			expect.objectContaining({ command: "imports start", mutation: true }),
+		]));
 
 		const focused = await runCli([
 			"inbox",
@@ -151,6 +234,15 @@ describe("Repzo CLI v2", () => {
 		expect(unsafe.stderr).not.toContain("foxa-secret");
 	});
 
+	it("includes a stable idempotency key in mutation previews", async () => {
+		const result = await runCli([
+			"contacts", "create", "--data", '{"firstName":"Maya"}', "--dry-run",
+			"--idempotency-key", "contact-create-maya-1",
+		]);
+		expect(result.code).toBe(0);
+		expect(JSON.parse(result.stdout)).toMatchObject({ data: { idempotencyKey: "contact-create-maya-1" } });
+	});
+
 	it("reads a mutation body from stdin", async () => {
 		const result = await runCli(
 			["contacts", "create", "--data", "@-", "--dry-run"],
@@ -163,6 +255,36 @@ describe("Repzo CLI v2", () => {
 				method: "POST",
 				url: expect.stringMatching(/\/api\/v1\/contacts$/),
 				body: { firstName: "Maya", country: "JO" },
+			},
+		});
+	});
+
+	it("previews import uploads without reading credentials or sending bytes", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "repzo-import-"));
+		const file = join(directory, "contacts.csv");
+		await writeFile(file, "firstName,lastName\nMaya,Ali\n");
+		const result = await runCli(["imports", "upload", file, "--dry-run"]);
+		expect(result.code).toBe(0);
+		expect(JSON.parse(result.stdout)).toMatchObject({
+			data: {
+				dryRun: true,
+				method: "POST",
+				file: { path: file, name: "contacts.csv", type: "text/csv" },
+			},
+		});
+	});
+
+	it("previews record attachment uploads with the file argument after record IDs", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "repzo-media-"));
+		const file = join(directory, "proposal.pdf");
+		await writeFile(file, "%PDF-1.4\n");
+		const result = await runCli(["media", "upload", "deal", "11111111-1111-4111-8111-111111111111", file, "--dry-run"]);
+		expect(result.code).toBe(0);
+		expect(JSON.parse(result.stdout)).toMatchObject({
+			data: {
+				dryRun: true,
+				url: expect.stringMatching(/\/media\/deal\/11111111-1111-4111-8111-111111111111$/),
+				file: { path: file, name: "proposal.pdf", type: "application/pdf" },
 			},
 		});
 	});
@@ -563,6 +685,8 @@ describe("Repzo CLI v2", () => {
 		let baseUrl = "";
 		let calls = 0;
 		let mutationCalls = 0;
+		let mutationIdempotencyKey: string | undefined;
+		let mutationIfMatch: string | undefined;
 		beforeAll(async () => {
 			const app = express();
 			app.get("/api/v1/contacts", (req, res) => {
@@ -599,13 +723,22 @@ describe("Repzo CLI v2", () => {
 					});
 					return;
 				}
+				res.setHeader("ETag", '"contact-version-1"');
 				res.json({ data: { id: req.params.id, name: "Maya" } });
 			});
-			app.post("/api/v1/contacts", (_req, res) => {
+			app.patch("/api/v1/contacts/:id", (req, res) => {
+				mutationIfMatch = req.get("If-Match");
+				res.json({ id: req.params.id, name: "Updated" });
+			});
+			app.post("/api/v1/contacts", (req, res) => {
 				mutationCalls += 1;
+				mutationIdempotencyKey = req.get("Idempotency-Key");
 				res
 					.status(503)
 					.json({ error: { code: "unavailable", message: "Try later" } });
+			});
+			app.post("/api/v1/reports/execute", (_req, res) => {
+				res.json({ data: [{ total: 3 }] });
 			});
 			await new Promise<void>((resolve) => {
 				server = app.listen(0, "127.0.0.1", () => {
@@ -675,6 +808,19 @@ describe("Repzo CLI v2", () => {
 			}
 		});
 
+		it("surfaces response ETags and sends If-Match on guarded writes", async () => {
+			const read = await runCli(["contacts", "get", "contact-1"], {
+				env: { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" },
+			});
+			expect(JSON.parse(read.stdout)).toMatchObject({ meta: { etag: '"contact-version-1"' } });
+			mutationIfMatch = undefined;
+			const write = await runCli([
+				"contacts", "update", "contact-1", "--data", '{"firstName":"Updated"}', "--yes", "--if-match", '"contact-version-1"',
+			], { env: { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" } });
+			expect(write.code).toBe(0);
+			expect(mutationIfMatch).toBe('"contact-version-1"');
+		});
+
 		it("uses the network exit code when the API cannot be reached", async () => {
 			const result = await runCli(["contacts", "list", "--no-retry"], {
 				env: {
@@ -691,12 +837,23 @@ describe("Repzo CLI v2", () => {
 
 		it("does not automatically retry mutations", async () => {
 			mutationCalls = 0;
+			mutationIdempotencyKey = undefined;
 			const result = await runCli(
-				["contacts", "create", "--data", '{"firstName":"Maya"}', "--yes"],
+				["contacts", "create", "--data", '{"firstName":"Maya"}', "--yes", "--idempotency-key", "contact-create-maya-1"],
 				{ env: { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" } },
 			);
 			expect(result.code).toBe(7);
 			expect(mutationCalls).toBe(1);
+			expect(mutationIdempotencyKey).toBe("contact-create-maya-1");
+		});
+
+		it("executes read-only POST commands without mutation confirmation", async () => {
+			const result = await runCli(
+				["reports", "execute", "--data", '{"entity":"deals"}'],
+				{ env: { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" } },
+			);
+			expect(result.code).toBe(0);
+			expect(JSON.parse(result.stdout)).toMatchObject({ data: [{ total: 3 }] });
 		});
 
 		it.each([

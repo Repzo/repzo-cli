@@ -1,6 +1,18 @@
 # Communications
 
-Use this reference for Inbox, voice, Repzo Send, and outbound event subscriptions. These surfaces can contact people or external systems; distinguish reads, drafts, and sends precisely. For Chat, read [chat-messages.md](chat-messages.md), which is also linked directly from `SKILL.md`.
+Use this reference for Inbox, personal notifications, voice, Repzo Send, and outbound event subscriptions. These surfaces can contact people or external systems; distinguish reads, drafts, and sends precisely. For Chat, read [chat-messages.md](chat-messages.md), which is also linked directly from `SKILL.md`.
+
+## Personal notifications
+
+Notification commands are always limited to the authenticated user's notifications in the active workspace. Listing and counting are reads; marking read or dismissing changes personal state and must be previewed like other mutations.
+
+```bash
+repzo notifications unread-count
+repzo notifications list --query 'unreadOnly=true' --limit 50
+repzo notifications read NOTIFICATION_ID --dry-run
+repzo notifications dismiss NOTIFICATION_ID --dry-run
+repzo notifications read-all --dry-run
+```
 
 ## Inbox
 
@@ -51,10 +63,9 @@ Inspect OpenAPI for each strict body.
 
 ## Event subscriptions
 
-Subscriptions are owned by the current Developer App. List event types and existing subscriptions before creating or changing one.
+Subscriptions are owned by the current Developer App. Inspect existing subscriptions and the live OpenAPI description before creating or changing one. The public API does not currently publish an event-type catalog, so do not invent event names.
 
 ```bash
-repzo events types
 repzo events subscriptions list --limit 100
 repzo events subscriptions create --data @subscription.json --dry-run
 ```
