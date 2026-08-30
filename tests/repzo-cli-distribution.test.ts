@@ -56,6 +56,7 @@ describe("Repzo CLI standalone distribution", () => {
 		expect(workflow).toContain('tags:\n      - "v*"');
 		expect(workflow).toContain("contents: write");
 		expect(workflow).not.toContain("CLI_RELEASE_TOKEN");
+		expect(workflow).not.toContain("bun-windows-arm64");
 		expect(workflow).toContain("Attest build provenance");
 		expect(workflow).toContain("Verify released binary");
 	});

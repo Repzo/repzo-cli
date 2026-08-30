@@ -8,7 +8,7 @@ The CLI is built and released entirely from the public [`Repzo/repzo-cli`](https
 2. Merge the release commit into `main`.
 3. Create and push the matching `vX.Y.Z` tag.
 
-The tag workflow runs the CLI, skill, installer, and distribution tests; compiles six Bun executables; creates SHA-256 checksums; signs the checksum manifest with keyless Sigstore; attests build provenance; and publishes the GitHub release. Linux, macOS, and Windows runners then download and execute the published binaries.
+The tag workflow runs the CLI, skill, installer, and distribution tests; compiles five Bun executables; creates SHA-256 checksums; signs the checksum manifest with keyless Sigstore; attests build provenance; and publishes the GitHub release. Linux, macOS, and Windows runners then download and execute the published binaries.
 
 No cross-repository token is required. The workflow publishes with this repository's short-lived `GITHUB_TOKEN`.
 

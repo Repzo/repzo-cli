@@ -2045,6 +2045,7 @@ function standalonePlatform() {
 			: process.arch === "arm64"
 				? "arm64"
 				: null;
+	if (os === "windows" && arch === "arm64") return null;
 	if (!os || !arch) return null;
 	return `${os}_${arch}`;
 }
