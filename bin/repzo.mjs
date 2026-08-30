@@ -14,12 +14,13 @@ import {
 	realpath,
 	rename,
 	rm,
+	stat,
 	symlink,
 	writeFile,
 } from "node:fs/promises";
 import http from "node:http";
 import { homedir, hostname } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { EMBEDDED_SKILL_FILES } from "../lib/embedded-skill.generated.mjs";
@@ -106,6 +107,16 @@ const GLOBAL_FLAGS = Object.freeze([
 		description: "Confirm and send a mutation.",
 	},
 	{
+		name: "--idempotency-key",
+		type: "string",
+		description: "Make a mutation retry-safe with a stable caller-generated key.",
+	},
+	{
+		name: "--if-match",
+		type: "string",
+		description: "Apply a direct record mutation only if its latest ETag still matches.",
+	},
+	{
 		name: "--json",
 		type: "boolean",
 		description: "Return the full JSON envelope.",
@@ -153,6 +164,7 @@ let OUTPUT_OPTIONS = {
 };
 let OUTPUT_POSITIONALS = [];
 let OUTPUT_CONTEXT = null;
+const RESPONSE_META = new WeakMap();
 
 const CRUD_RESOURCES = [
 	["accounts", "/accounts"],
@@ -211,6 +223,83 @@ for (const [resource, path] of CRUD_RESOURCES) {
 		{ args: ["id"] },
 	);
 }
+
+for (const name of [
+	"countries",
+	"users",
+	"pipelines",
+	"industries",
+	"lead-sources",
+	"lead-channels",
+	"departments",
+	"locations",
+	"appointment-statuses",
+	"cancellation-reasons",
+	"tax-rates",
+	"price-lists",
+	"product-categories",
+	"product-suppliers",
+	"product-brands",
+	"project-templates",
+	"approval-workflows",
+])
+	command(
+		["metadata", name],
+		"GET",
+		`/metadata/${name}`,
+		`List ${name.replaceAll("-", " ")} reference values.`,
+	);
+command(
+	["metadata", "properties"],
+	"GET",
+	"/metadata/properties/{entityType}",
+	"Describe system and custom properties for a public entity type.",
+	{ args: ["entityType"] },
+);
+
+command(["search", "records"], "GET", "/search", "Search records across granted CRM resources.");
+command(["timeline", "list"], "GET", "/timeline", "List timeline events for one CRM record.");
+command(["timeline", "sources"], "GET", "/timeline/sources", "List available timeline event sources.");
+command(["comments", "list"], "GET", "/comments/{entityType}/{entityId}", "List comments on one CRM record.", {
+	args: ["entityType", "entityId"],
+	pagination: "offset",
+});
+command(["comments", "create"], "POST", "/comments/{entityType}/{entityId}", "Add a comment to one CRM record.", {
+	args: ["entityType", "entityId"],
+	body: true,
+});
+command(["comments", "update"], "PATCH", "/comments/{id}", "Update one of your comments.", {
+	args: ["id"],
+	body: true,
+});
+command(["comments", "delete"], "DELETE", "/comments/{id}", "Delete one of your comments.", {
+	args: ["id"],
+});
+command(["notifications", "list"], "GET", "/notifications", "List your notifications.", { pagination: "offset" });
+command(["notifications", "unread-count"], "GET", "/notifications/unread-count", "Count your unread notifications.");
+command(["notifications", "read"], "POST", "/notifications/{id}/read", "Mark one of your notifications read.", {
+	args: ["id"],
+});
+command(["notifications", "read-all"], "POST", "/notifications/read-all", "Mark all your notifications read.");
+command(["notifications", "dismiss"], "POST", "/notifications/{id}/dismiss", "Dismiss one of your notifications.", {
+	args: ["id"],
+});
+command(["approvals", "pending"], "GET", "/approvals/pending", "List approval requests awaiting your decision.", { pagination: "offset" });
+command(["approvals", "get"], "GET", "/approvals/{id}", "Get an approval request.", { args: ["id"] });
+command(["approvals", "approve"], "POST", "/approvals/{id}/approve", "Approve a request awaiting your decision.", { args: ["id"], body: true });
+command(["approvals", "reject"], "POST", "/approvals/{id}/reject", "Reject a request awaiting your decision.", { args: ["id"], body: true });
+command(["media", "list"], "GET", "/media/{entityType}/{entityId}", "List attachments on one CRM record.", { args: ["entityType", "entityId"], pagination: "offset" });
+command(["media", "upload"], "POST", "/media/{entityType}/{entityId}", "Upload a private attachment to one CRM record.", {
+	args: ["entityType", "entityId", "file"],
+	file: true,
+	fileArg: 2,
+});
+command(["media", "url"], "GET", "/media/{id}/url", "Create a short-lived attachment download URL.", { args: ["id"] });
+command(["media", "delete"], "DELETE", "/media/{id}", "Delete one CRM record attachment.", { args: ["id"] });
+command(["price-offers", "items", "list"], "GET", "/price-offers/{id}/items", "List price offer line items and totals.", { args: ["id"] });
+command(["price-offers", "items", "replace"], "PUT", "/price-offers/{id}/items", "Atomically replace price offer line items and recalculate totals.", { args: ["id"], body: true });
+command(["invoices", "open"], "POST", "/invoices/{id}/open", "Open a draft invoice through its guarded workflow.", { args: ["id"] });
+command(["invoices", "void"], "POST", "/invoices/{id}/void", "Void an invoice through its guarded workflow.", { args: ["id"] });
 
 command(["pipelines", "list"], "GET", "/pipelines", "List pipelines.", {
 	pagination: "offset",
@@ -290,7 +379,7 @@ command(
 	"POST",
 	"/reports/execute",
 	"Execute a validated aggregate report.",
-	{ body: true },
+	{ body: true, mutation: false },
 );
 command(
 	["reports", "categories"],
@@ -381,11 +470,32 @@ command(
 );
 
 command(
+	["chat", "users", "list"],
+	"GET",
+	"/chat/users",
+	"List searchable workspace users available for direct chat.",
+	{ pagination: "offset" },
+);
+command(
 	["chat", "channels", "list"],
 	"GET",
 	"/chat/channels",
 	"List visible chat channels.",
 	{ pagination: "offset" },
+);
+command(
+	["chat", "channels", "direct"],
+	"POST",
+	"/chat/channels/direct",
+	"Find or create a direct chat channel with a workspace user.",
+	{ body: true },
+);
+command(
+	["chat", "members", "list"],
+	"GET",
+	"/chat/channels/{channelId}/members",
+	"List members of a visible chat channel.",
+	{ args: ["channelId"], pagination: "offset" },
 );
 command(
 	["chat", "channels", "get"],
@@ -483,13 +593,6 @@ for (const [verb, method] of [
 		`${verb[0].toUpperCase()}${verb.slice(1)} an event subscription.`,
 		{ args: ["id"], body: method === "PATCH" },
 	);
-command(
-	["events", "types"],
-	"GET",
-	"/events/types",
-	"List subscribable event types.",
-);
-
 command(
 	["send", "campaigns", "list"],
 	"GET",
@@ -605,7 +708,28 @@ for (const action of ["publish", "unpublish", "archive"])
 command(["imports", "list"], "GET", "/data/imports", "List import jobs.", {
 	pagination: "offset",
 });
+command(["imports", "upload"], "POST", "/data/imports/upload", "Upload a CSV or XLSX import file.", {
+	args: ["file"],
+	file: true,
+});
+command(["imports", "create"], "POST", "/data/imports", "Create a pending import job.", {
+	body: true,
+});
 command(["imports", "get"], "GET", "/data/imports/{id}", "Get an import job.", {
+	args: ["id"],
+});
+command(["imports", "update"], "PATCH", "/data/imports/{id}", "Configure a pending import job.", {
+	args: ["id"],
+	body: true,
+});
+command(["imports", "validate"], "POST", "/data/imports/{id}/validate", "Dry-run validate a pending import job.", {
+	args: ["id"],
+	mutation: false,
+});
+command(["imports", "start"], "POST", "/data/imports/{id}/start", "Start a validated import job.", {
+	args: ["id"],
+});
+command(["imports", "delete"], "DELETE", "/data/imports/{id}", "Delete a non-processing import job.", {
 	args: ["id"],
 });
 command(
@@ -628,7 +752,7 @@ Usage:
   repzo <resource> <action> [ids...] [options]
   repzo inbox conversations reply CONVERSATION_ID --data @reply.json --dry-run
   repzo chat send CHANNEL_ID --data '{"body":"Hello","bodyFormat":"plain"}' --dry-run
-  repzo reports execute --data @report.json --yes
+  repzo reports execute --data @report.json
   repzo commands --json
   repzo auth login [--profile NAME]
   repzo auth login --token-stdin [--profile NAME]
@@ -644,6 +768,8 @@ Common options:
   --data JSON|@file|@-    Request body
   --dry-run               Print a mutation without sending it
   --yes                   Confirm a mutation
+  --idempotency-key KEY   Make mutation retries safe with a stable key
+  --if-match ETAG         Reject a direct record mutation if the record changed
   --quiet                 Print only the response data
   --agent                 Print raw data and disable human-oriented envelopes
   --compact               Print compact JSON
@@ -852,6 +978,7 @@ function inferSummary(data) {
 
 function json(value, compact = OUTPUT_OPTIONS.compact, presentation = {}) {
 	const { data, meta } = normalizeSuccess(value);
+	const responseMeta = value && typeof value === "object" ? RESPONSE_META.get(value) : undefined;
 	if (
 		OUTPUT_OPTIONS.quiet ||
 		(OUTPUT_OPTIONS.agent && !presentation.envelope)
@@ -869,7 +996,7 @@ function json(value, compact = OUTPUT_OPTIONS.compact, presentation = {}) {
 			data,
 			summary: presentation.summary || inferSummary(data),
 			breadcrumbs: presentation.breadcrumbs || inferBreadcrumbs(data, meta),
-			meta: { ...meta, command },
+			meta: { ...meta, ...responseMeta, command },
 		},
 		compact,
 	);
@@ -906,6 +1033,8 @@ function parseArgs(argv) {
 		"base-url",
 		"cursor",
 		"data",
+		"idempotency-key",
+		"if-match",
 		"limit",
 		"page",
 		"profile",
@@ -1061,6 +1190,7 @@ async function readBody(source) {
 
 function publicCommand(item) {
 	const args = item.args || [];
+	const mutation = item.mutation ?? !["GET", "HEAD", "OPTIONS"].includes(item.method);
 	return {
 		command: item.tokens.join(" "),
 		description: item.description,
@@ -1068,10 +1198,11 @@ function publicCommand(item) {
 		path: item.path,
 		arguments: args,
 		requiresBody: Boolean(item.body),
-		mutation: !["GET", "HEAD", "OPTIONS"].includes(item.method),
+		requiresFile: Boolean(item.file),
+		mutation,
 		pagination: item.pagination || null,
 		gotchas: [
-			...(!["GET", "HEAD", "OPTIONS"].includes(item.method)
+			...(mutation
 				? ["Preview with --dry-run; sending requires --yes."]
 				: []),
 			...(item.body ? ["The request body is strict JSON."] : []),
@@ -1766,6 +1897,8 @@ async function requestJson(url, init, options) {
 					? "Review the profile's scopes and the user's current workspace permissions."
 					: status === 404
 						? "Verify the record ID and workspace."
+						: status === 412
+							? "Fetch the record again and use its new meta.etag only after reviewing the changes."
 						: status === 422
 							? "Inspect error.details and the resource metadata before retrying."
 							: status === 429
@@ -1782,10 +1915,15 @@ async function requestJson(url, init, options) {
 			details: error?.details ?? (error ? { code: error.code } : result),
 		});
 	}
-	return result ?? { ok: true, status: response.status };
+	const output = result ?? { ok: true, status: response.status };
+	if (output && typeof output === "object") {
+		const etag = response.headers.get("etag");
+		if (etag) RESPONSE_META.set(output, { etag });
+	}
+	return output;
 }
 
-async function runApi(method, path, body, options, pagination) {
+async function runApi(method, path, body, options, pagination, mutation) {
 	const profile = await resolveProfile(options);
 	const publicDocs = path === "/openapi.json";
 	const url = new URL(
@@ -1799,7 +1937,9 @@ async function runApi(method, path, body, options, pagination) {
 	for (const name of ["page", "limit", "cursor", "q"])
 		if (options[name] !== undefined)
 			url.searchParams.set(name, String(options[name]));
-	const mutating = !["GET", "HEAD", "OPTIONS"].includes(method);
+	const mutating = mutation ?? !["GET", "HEAD", "OPTIONS"].includes(method);
+	if (options["idempotency-key"] && !/^[A-Za-z0-9._:-]{1,255}$/.test(options["idempotency-key"]))
+		fail("--idempotency-key must be 1-255 characters using letters, numbers, '.', '_', ':', or '-'.");
 	if (mutating && options["dry-run"]) {
 		json(
 			{
@@ -1808,6 +1948,8 @@ async function runApi(method, path, body, options, pagination) {
 				method,
 				url: url.toString(),
 				body,
+				...(options["idempotency-key"] ? { idempotencyKey: options["idempotency-key"] } : {}),
+				...(options["if-match"] ? { ifMatch: options["if-match"] } : {}),
 			},
 			options.compact,
 		);
@@ -1841,10 +1983,12 @@ async function runApi(method, path, body, options, pagination) {
 		);
 	const init = {
 		method,
-		headers: {
+			headers: {
 			Accept: "application/json",
 			...(profile.token ? { Authorization: `Bearer ${profile.token}` } : {}),
 			...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+			...(mutating && options["idempotency-key"] ? { "Idempotency-Key": options["idempotency-key"] } : {}),
+			...(mutating && options["if-match"] ? { "If-Match": options["if-match"] } : {}),
 		},
 		...(body !== undefined ? { body: JSON.stringify(body) } : {}),
 	};
@@ -1900,6 +2044,50 @@ async function runApi(method, path, body, options, pagination) {
 		}
 	}
 	fail("Auto-pagination stopped after 10,000 pages.");
+}
+
+function uploadMimeType(path) {
+	const extension = extname(path).toLowerCase();
+	if (extension === ".csv") return "text/csv";
+	if (extension === ".xlsx")
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+	if (extension === ".xls") return "application/vnd.ms-excel";
+	if (extension === ".pdf") return "application/pdf";
+	if (extension === ".txt") return "text/plain";
+	if (extension === ".doc") return "application/msword";
+	if (extension === ".docx")
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+	if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
+	if (extension === ".png") return "image/png";
+	if (extension === ".gif") return "image/gif";
+	if (extension === ".webp") return "image/webp";
+	return "application/octet-stream";
+}
+
+async function runFileUpload(path, filePath, options) {
+	let info;
+	try {
+		info = await stat(filePath);
+	} catch (error) {
+		fail(`Could not read upload file: ${error.message}`, { hint: "Pass an existing supported file path." });
+	}
+	if (!info.isFile()) fail("Upload path must point to a regular file.");
+	const contents = await readFile(filePath);
+	const contentSha256 = crypto.createHash("sha256").update(contents).digest("hex");
+	const profile = await resolveProfile(options);
+	if (options["idempotency-key"] && !/^[A-Za-z0-9._:-]{1,255}$/.test(options["idempotency-key"]))
+		fail("--idempotency-key must be 1-255 characters using letters, numbers, '.', '_', ':', or '-'.");
+	const url = new URL(`${profile.apiRoot}${path}`);
+	if (options["dry-run"]) {
+		json({ dryRun: true, profile: profile.profile, method: "POST", url: url.toString(), file: { path: resolve(filePath), name: basename(filePath), size: info.size, type: uploadMimeType(filePath), sha256: contentSha256 }, ...(options["idempotency-key"] ? { idempotencyKey: options["idempotency-key"] } : {}) }, options.compact);
+		return;
+	}
+	if (!profile.token) fail(`No API token for profile '${profile.profile}'. Run repzo auth login --profile ${profile.profile} or set REPZO_TOKEN.`, { code: "auth", exitCode: EXIT_CODES.auth });
+	if (!profile.token.startsWith("foxa-") && !profile.token.startsWith("foxu-")) fail("API token must be a foxa-* Developer API key or foxu-* user access token.", { code: "auth", exitCode: EXIT_CODES.auth });
+	if (!options.yes) fail("Refusing file upload without --yes. Use --dry-run to inspect the request first.");
+	const form = new FormData();
+	form.append("file", new Blob([contents], { type: uploadMimeType(filePath) }), basename(filePath));
+	json(await requestJson(url, { method: "POST", headers: { Accept: "application/json", Authorization: `Bearer ${profile.token}`, "X-Content-SHA256": contentSha256, ...(options["idempotency-key"] ? { "Idempotency-Key": options["idempotency-key"] } : {}) }, body: form }, options), options.compact);
 }
 
 async function skillInstallationChecks() {
@@ -1990,7 +2178,7 @@ async function doctor(options) {
 	if (profile.token) {
 		try {
 			const response = await fetchWithRetry(
-				`${profile.apiRoot}/metadata/countries?limit=1`,
+				`${profile.apiRoot}/metadata/countries`,
 				{
 					headers: {
 						Accept: "application/json",
@@ -2454,10 +2642,15 @@ async function main() {
 		path = path.replace(`{${name}}`, encodeURIComponent(values[index]));
 	});
 	OUTPUT_CONTEXT = { item: selected, args: commandArgs };
+	if (selected.file) {
+		if (options.data !== undefined) fail("File upload commands take a file path argument, not --data.");
+		await runFileUpload(path, values[selected.fileArg ?? 0], options);
+		return;
+	}
 	const body = await readBody(options.data);
 	if (selected.body && body === undefined)
 		fail(`${selected.method} requires --data JSON, @file, or @-.`);
-	await runApi(selected.method, path, body, options, selected.pagination);
+	await runApi(selected.method, path, body, options, selected.pagination, selected.mutation);
 }
 
 try {

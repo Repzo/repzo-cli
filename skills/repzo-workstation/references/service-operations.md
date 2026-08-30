@@ -46,6 +46,19 @@ repzo requests reject REQUEST_ID --data '{"reason":"Missing receipt"}' --yes
 
 Do not combine state transitions. Read the current request immediately before the action and verify it after execution. Rejection requires a user-provided or explicitly authorized reason; do not invent one.
 
+## Approval queue
+
+The approval queue covers configured multi-step workflows for requests and price offers. It returns only items awaiting the authenticated user's current decision. Fetch the exact approval request before acting and preserve any explanation supplied by the user.
+
+```bash
+repzo approvals pending
+repzo approvals get APPROVAL_ID
+repzo approvals approve APPROVAL_ID --data '{"comments":"Reviewed and approved."}' --dry-run
+repzo approvals reject APPROVAL_ID --data '{"comments":"Budget owner sign-off is missing."}' --dry-run
+```
+
+Approve or reject only after explicit authorization. Use one stable idempotency key if retrying a decision. A successful action may advance to another approver instead of completing the whole workflow; inspect the returned `status` and `currentNodeIndex`.
+
 ## Complete-list requests
 
 Use `--all` only for language such as “all open tickets” or when computing a complete aggregate that the reports API cannot provide. Otherwise return one bounded page and say that more results may exist.

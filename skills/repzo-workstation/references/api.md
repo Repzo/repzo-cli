@@ -23,6 +23,25 @@ repzo auth status --profile work
 repzo doctor
 ```
 
+For retry-safe writes, generate one non-secret operation key and keep it stable across retries of the identical request:
+
+```bash
+repzo contacts create --data @contact.json --dry-run --idempotency-key contact-import-row-42
+repzo contacts create --data @contact.json --yes --idempotency-key contact-import-row-42
+```
+
+Never reuse an idempotency key for different request data. The API returns `409 conflict` when a key is reused with a different method, path, query, or body.
+
+Direct record reads expose the current version as `meta.etag` in normal CLI output. Use it when a write depends on the state you just inspected:
+
+```bash
+repzo deals get DEAL_ID
+repzo deals update DEAL_ID --data @deal-change.json --dry-run --if-match '"ETAG_FROM_GET"'
+repzo deals update DEAL_ID --data @deal-change.json --yes --if-match '"ETAG_FROM_GET"' --idempotency-key deal-DEAL_ID-change-1
+```
+
+`412 precondition_failed` means another actor changed the record. Fetch it again and reconsider the patch; never automatically substitute the new ETag and overwrite their change.
+
 On a remote machine, use `repzo auth login --no-browser` and open the printed URL on the same machine that can reach the loopback callback.
 
 The browser flow uses PKCE, asks the signed-in user to choose scopes, and stores a rotating refresh credential. The resulting access remains limited by that user's live workspace role and visibility. Use `--token-stdin` for a `foxa-*` Developer App key in CI or other non-browser environments:
@@ -67,6 +86,6 @@ The CLI retries `429`, `502`, `503`, and `504` with bounded exponential backoff.
 
 ## Coverage boundary
 
-Standard resources include contacts, accounts, deals, activities, campaigns, projects, tickets, invoices, carts, orders, line items, price offers, products, pipelines, reports, appointments, requests, request types, tags, forms, segments, collections, and articles. Additional public surfaces include Send, metadata, event subscriptions, Inbox, chat, voice, associations, imports, and exports.
+Standard resources include contacts, accounts, deals, activities, campaigns, projects, tickets, invoices, carts, orders, line items, price offers, products, pipelines, reports, appointments, requests, request types, tags, forms, segments, collections, and articles. Additional public surfaces include search, timelines, comments, media, approvals, notifications, Send, metadata, event subscriptions, Inbox, chat, voice, associations, imports, and exports.
 
 If the requested operation is missing from OpenAPI, report the gap. Do not import server internals, query the database, use session-only UI routes, or mint broader credentials.

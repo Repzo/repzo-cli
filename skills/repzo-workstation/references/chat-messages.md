@@ -5,6 +5,7 @@ Use this reference for Chat reads, sends, Markdown, Slack-style structured messa
 ## Contents
 
 - [Safe send workflow](#safe-send-workflow)
+- [Direct messages](#direct-messages)
 - [Message fields](#message-fields)
 - [Plain text](#plain-text)
 - [Markdown announcement](#markdown-announcement)
@@ -26,6 +27,25 @@ repzo chat messages list CHANNEL_ID --limit 50
 ```
 
 For complex JSON, put the payload in a temporary `message.json` file so shell quoting cannot change it. Sending is an external side effect; drafting a payload does not authorize sending it.
+
+## Direct messages
+
+Search for the person, use their exact returned user ID to find or create the direct channel, then send through the normal Chat endpoint. Do not guess user or channel IDs.
+Creating a direct channel requires delegated `foxu-*` user authentication. A `foxa-*` Developer App key may post as the app to an existing visible channel, but it must not create a human-to-human DM under the app creator's identity.
+
+```bash
+repzo chat users list --query q=Hassan --limit 20
+repzo chat channels direct --data '{"targetUserId":"USER_ID"}' --dry-run
+repzo chat channels direct --data '{"targetUserId":"USER_ID"}' --yes
+repzo chat send DIRECT_CHANNEL_ID --data @message.json --dry-run
+repzo chat send DIRECT_CHANNEL_ID --data @message.json --yes
+```
+
+When a name matches more than one user, compare the returned email addresses and ask the user to choose. Inspect a channel when needed with:
+
+```bash
+repzo chat members list CHANNEL_ID --limit 50
+```
 
 ## Message fields
 

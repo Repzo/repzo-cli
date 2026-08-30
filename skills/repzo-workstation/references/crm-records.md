@@ -13,6 +13,12 @@ repzo deals list --query 'pipelineId=PIPELINE_ID' --limit 20
 repzo activities list --query 'ownerUserId=USER_ID' --limit 20
 ```
 
+When the entity type is unknown or the user gives only a name/phrase, use scoped global search. Narrow `entityTypes` whenever possible; results include only resources granted to the active credential.
+
+```bash
+repzo search records --query 'q=Acme' --query 'entityTypes=account,deal' --limit 10
+```
+
 If several records match, present distinguishing fields and ask for the target. Never choose by list position. Fetch the selected record before mutating it:
 
 ```bash
@@ -25,8 +31,8 @@ repzo deals get DEAL_ID
 Read property metadata when fields or validation rules are unfamiliar:
 
 ```bash
-repzo request GET /metadata/properties/contact
-repzo request GET /metadata/properties/deal
+repzo metadata properties contact
+repzo metadata properties deal
 ```
 
 Use native API field names at the top level and stable custom-property names under `customProperties`:
@@ -61,6 +67,47 @@ repzo associations replace --data @associations.json --dry-run
 ```
 
 Use direct foreign-key fields for normal one-to-one links. Do not invent polymorphic associations for unsupported resources.
+
+## Record timeline
+
+Use the timeline when the user asks what happened to one known record. Both `entityType` and `entityId` are required, so resolve the record first. Discover available source names instead of guessing them.
+
+```bash
+repzo timeline sources
+repzo timeline list --query 'entityType=deal' --query 'entityId=DEAL_ID' --limit 30
+repzo timeline list --query 'entityType=contact' --query 'entityId=CONTACT_ID' --query 'sources=activity,email_send'
+```
+
+Follow `meta.nextCursor` with `--query 'cursor=...'` only when more history is required. Timeline reads obey the record scope and the signed-in user's visibility.
+
+## Comments
+
+Comments are scoped to one exact record. Read the record and its existing thread before posting. Mentions are workspace user IDs discovered through `repzo metadata users`; replies use an existing comment ID from the same record.
+
+```bash
+repzo comments list deal DEAL_ID
+repzo comments create deal DEAL_ID --data '{"content":"Commercial terms approved.","mentions":["USER_ID"]}' --dry-run
+repzo comments create deal DEAL_ID --data @comment.json --yes --idempotency-key deal-DEAL_ID-comment-1
+repzo comments create deal DEAL_ID --data '{"content":"Following up.","parentId":"COMMENT_ID"}' --dry-run
+repzo comments update COMMENT_ID --data '{"content":"Updated wording."}' --dry-run
+repzo comments delete COMMENT_ID --dry-run
+```
+
+A delegated user can update or delete only their own comments. Never reuse a `parentId` from another record.
+
+## Attachments
+
+Attachments are private by default and inherit access from their exact CRM record. List first, upload only a supported document/image type, and request a short-lived URL only when the file must be consumed.
+
+```bash
+repzo media list deal DEAL_ID
+repzo media upload deal DEAL_ID ./proposal.pdf --dry-run
+repzo media upload deal DEAL_ID ./proposal.pdf --yes --idempotency-key deal-DEAL_ID-proposal-v1
+repzo media url MEDIA_ID
+repzo media delete MEDIA_ID --dry-run
+```
+
+Do not expose a returned temporary URL in a public message; it grants time-limited access to the private file.
 
 ## Deletes
 
