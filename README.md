@@ -45,11 +45,20 @@ repzo chat send CHANNEL_ID --data '{"body":"Hello","bodyFormat":"plain"}' --dry-
 
 The CLI defaults to `https://workstation.repzo.com`. Use `--base-url` or `REPZO_BASE_URL` for a different deployment. Mutations require either `--dry-run` or `--yes`. Credentials are accepted through browser login, stdin, or environment variables—never command-line arguments.
 
-Upgrade an installer-managed binary with:
+Check whether an installer-managed binary has an update available:
+
+```bash
+repzo upgrade
+```
+
+The check is read-only. To install an available update and verify the installation:
 
 ```bash
 repzo upgrade --yes
+repzo doctor
 ```
+
+The upgraded CLI refreshes installed agent skills automatically. Start a new agent thread afterward so it loads the refreshed skill.
 
 See [Releases](https://github.com/Repzo/repzo-cli/releases) for checksummed binaries for macOS, Linux, and Windows.
 
