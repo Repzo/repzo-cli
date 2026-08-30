@@ -43,7 +43,7 @@ repzo deals get DEAL_ID
 repzo chat send CHANNEL_ID --data '{"body":"Hello","bodyFormat":"plain"}' --dry-run
 ```
 
-Mutations require either `--dry-run` or `--yes`. Credentials are accepted through browser login, stdin, or environment variables—never command-line arguments.
+The CLI defaults to `https://workstation.repzo.com`. Use `--base-url` or `REPZO_BASE_URL` for a different deployment. Mutations require either `--dry-run` or `--yes`. Credentials are accepted through browser login, stdin, or environment variables—never command-line arguments.
 
 Upgrade an installer-managed binary with:
 
