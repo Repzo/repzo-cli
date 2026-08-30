@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repzo Workstation"
+  short_description: "Operate Repzo Workstation safely"
+  default_prompt: "Use $repzo-workstation to inspect Workstation data and make the requested changes safely."
