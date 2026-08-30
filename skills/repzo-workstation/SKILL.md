@@ -31,6 +31,18 @@ repzo openapi --quiet
 
 Normal CLI output is `{ ok, data, summary, breadcrumbs, meta }`. Follow breadcrumbs for safe next actions. Use `--agent` or `--quiet` when only response data is needed. Never pass credentials in argv or print them.
 
+## Keep the CLI current
+
+Once at the start of an agent thread, check whether a newer standalone CLI is available:
+
+```bash
+repzo upgrade
+```
+
+This check is read-only. If `updateAvailable` is `true`, report the current and latest versions and ask the user before running `repzo upgrade --yes`. Never upgrade silently during an unrelated Workstation task. Repository or package-manager installations must be updated through their owning workflow instead.
+
+The CLI refreshes its installed skill after its version changes. After upgrading, run `repzo doctor` to verify the installation, then start a new agent thread so the refreshed skill is loaded before continuing.
+
 ## Route to the relevant reference
 
 Read only the references needed for the task:
