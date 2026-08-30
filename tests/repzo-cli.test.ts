@@ -167,6 +167,29 @@ describe("Repzo CLI v2", () => {
 		});
 	});
 
+	it("uses the production Workstation origin by default", async () => {
+		const configDir = await mkdtemp(join(tmpdir(), "repzo-cli-default-origin-"));
+		const result = await runCli(
+			[
+				"contacts",
+				"create",
+				"--data",
+				'{"firstName":"Maya"}',
+				"--dry-run",
+			],
+			{
+				env: {
+					REPZO_CONFIG_DIR: configDir,
+					REPZO_BASE_URL: "",
+				},
+			},
+		);
+		expect(result.code).toBe(0);
+		expect(JSON.parse(result.stdout).data.url).toBe(
+			"https://workstation.repzo.com/api/v1/contacts",
+		);
+	});
+
 	it("rejects unknown flags with a structured usage error", async () => {
 		const result = await runCli(["contacts", "list", "--unknown", "value"]);
 		expect(result.code).toBe(1);
@@ -433,7 +456,7 @@ describe("Repzo CLI v2", () => {
 			).resolves.toBeUndefined();
 			expect(
 				await readFile(join(sharedSkill, ".installed-version"), "utf8"),
-			).toBe("1.0.2\n");
+			).toBe("1.0.3\n");
 		}
 	});
 
@@ -481,7 +504,7 @@ describe("Repzo CLI v2", () => {
 		expect(refreshed.code).toBe(0);
 		expect(
 			await readFile(join(sharedSkill, ".installed-version"), "utf8"),
-		).toBe("1.0.2\n");
+		).toBe("1.0.3\n");
 		expect(await readFile(join(sharedSkill, "SKILL.md"), "utf8")).toContain(
 			"Operate Workstation through the `repzo` CLI",
 		);

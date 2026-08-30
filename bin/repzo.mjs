@@ -39,7 +39,7 @@ const COMPILED_VERSION =
 	typeof REPZO_CLI_VERSION === "string" ? REPZO_CLI_VERSION : null;
 const STANDALONE_BUILD =
 	typeof REPZO_STANDALONE === "boolean" && REPZO_STANDALONE;
-const DEFAULT_ORIGIN = "http://localhost:5000";
+const DEFAULT_ORIGIN = "https://workstation.repzo.com";
 const CONFIG_DIR =
 	process.env.REPZO_CONFIG_DIR ||
 	join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "repzo");
