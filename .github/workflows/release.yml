@@ -42,7 +42,6 @@ jobs:
           - bun-darwin-x64
           - bun-linux-arm64
           - bun-linux-x64
-          - bun-windows-arm64
           - bun-windows-x64
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5

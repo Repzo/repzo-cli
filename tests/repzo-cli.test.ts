@@ -433,7 +433,7 @@ describe("Repzo CLI v2", () => {
 			).resolves.toBeUndefined();
 			expect(
 				await readFile(join(sharedSkill, ".installed-version"), "utf8"),
-			).toBe("1.0.1\n");
+			).toBe("1.0.2\n");
 		}
 	});
 
@@ -481,7 +481,7 @@ describe("Repzo CLI v2", () => {
 		expect(refreshed.code).toBe(0);
 		expect(
 			await readFile(join(sharedSkill, ".installed-version"), "utf8"),
-		).toBe("1.0.1\n");
+		).toBe("1.0.2\n");
 		expect(await readFile(join(sharedSkill, "SKILL.md"), "utf8")).toContain(
 			"Operate Workstation through the `repzo` CLI",
 		);

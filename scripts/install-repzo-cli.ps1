@@ -22,7 +22,7 @@ function Get-PlatformName {
   $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
   switch ($arch) {
     "x64" { return "windows_x64" }
-    "arm64" { return "windows_arm64" }
+    "arm64" { throw "Windows ARM64 is not yet supported. Use an x64 Windows environment." }
     default { throw "Unsupported CPU architecture: $arch" }
   }
 }
