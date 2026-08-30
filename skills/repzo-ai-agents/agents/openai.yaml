@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repzo AI Agents"
+  short_description: "Improve, publish, and safely test Repzo AI agents"
+  default_prompt: "Use $repzo-ai-agents to inspect this agent, propose improvements, and test its draft safely."

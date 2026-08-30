@@ -23,7 +23,7 @@ import { homedir, hostname } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { EMBEDDED_SKILL_FILES } from "../lib/embedded-skill.generated.mjs";
+import { EMBEDDED_SKILLS } from "../lib/embedded-skill.generated.mjs";
 import { setMacOSKeychainCredential } from "../lib/macos-keychain.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -33,7 +33,7 @@ const RELEASE_TAG_PREFIX = "v";
 const RELEASE_SIGNING_REPOSITORY = "Repzo/repzo-cli";
 const RELEASE_SIGNING_WORKFLOW = "release.yml";
 const RELEASE_SIGNING_TAG_PREFIX = "v";
-const SKILL_NAME = "repzo-workstation";
+const SKILL_NAMES = Object.freeze(["repzo-workstation", "repzo-ai-agents"]);
 const SKILL_VERSION_FILE = ".installed-version";
 const SKILL_MANAGED_FILE = ".repzo-managed";
 const COMPILED_VERSION =
@@ -705,6 +705,18 @@ for (const action of ["publish", "unpublish", "archive"])
 		`${action[0].toUpperCase()}${action.slice(1)} an article.`,
 		{ args: ["id"] },
 	);
+command(["agents", "list"], "GET", "/agents", "List AI agents.", { pagination: "offset" });
+command(["agents", "get"], "GET", "/agents/{id}", "Get a curated AI agent configuration.", { args: ["id"] });
+command(["agents", "update"], "PATCH", "/agents/{id}", "Update an AI agent draft or playbook.", { args: ["id"], body: true });
+command(["agents", "knowledge", "list"], "GET", "/agents/{id}/knowledge-sources", "List an AI agent's knowledge sources.", { args: ["id"], pagination: "offset" });
+command(["agents", "knowledge", "add"], "POST", "/agents/{id}/knowledge-sources", "Add an AI agent knowledge source.", { args: ["id"], body: true });
+command(["agents", "knowledge", "delete"], "DELETE", "/agents/{id}/knowledge-sources/{sourceId}", "Remove an AI agent knowledge source.", { args: ["id", "sourceId"] });
+command(["agents", "knowledge", "reindex"], "POST", "/agents/{id}/knowledge-sources/{sourceId}/reindex", "Reindex or resync an AI agent knowledge source.", { args: ["id", "sourceId"] });
+command(["agents", "deployments"], "GET", "/agents/{id}/deployments", "List sanitized AI agent deployments.", { args: ["id"], pagination: "offset" });
+command(["agents", "publish"], "POST", "/agents/{id}/publish", "Publish the reviewed AI agent draft.", { args: ["id"] });
+command(["agents", "test", "start"], "POST", "/agents/{id}/test-conversations", "Start an isolated draft test conversation with simulated write actions.", { args: ["id"], body: true });
+command(["agents", "test", "messages"], "GET", "/agents/{id}/test-conversations/{conversationId}/messages", "List messages in an AI agent test conversation.", { args: ["id", "conversationId"], pagination: "cursor" });
+command(["agents", "test", "send"], "POST", "/agents/{id}/test-conversations/{conversationId}/messages", "Send a customer-side message into an AI agent test conversation.", { args: ["id", "conversationId"], body: true });
 command(["imports", "list"], "GET", "/data/imports", "List import jobs.", {
 	pagination: "offset",
 });
@@ -1606,14 +1618,14 @@ async function handleProfiles(positionals, options) {
 	fail(`Unknown profiles action: ${action}. Use list, show, use, or delete.`);
 }
 
-function sharedSkillDirectory() {
+function sharedSkillDirectory(skillName = SKILL_NAMES[0]) {
 	const agentsHome =
 		process.env.REPZO_AGENTS_HOME || join(homedir(), ".agents");
-	return join(agentsHome, "skills", SKILL_NAME);
+	return join(agentsHome, "skills", skillName);
 }
 
-function agentSkillDirectory(target) {
-	return join(AGENT_TARGETS[target].home(), "skills", SKILL_NAME);
+function agentSkillDirectory(target, skillName = SKILL_NAMES[0]) {
+	return join(AGENT_TARGETS[target].home(), "skills", skillName);
 }
 
 async function pathInfo(targetPath) {
@@ -1635,21 +1647,21 @@ async function installedSkillVersion(skillDirectory) {
 	}
 }
 
-async function isRepzoSkill(skillDirectory) {
+async function isRepzoSkill(skillDirectory, skillName = SKILL_NAMES[0]) {
 	try {
 		const contents = await readFile(join(skillDirectory, "SKILL.md"), "utf8");
-		return /^---\s*[\s\S]*?^name:\s*repzo-workstation\s*$/m.test(contents);
+		return new RegExp(`^---\\s*[\\s\\S]*?^name:\\s*${skillName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m").test(contents);
 	} catch {
 		return false;
 	}
 }
 
-async function removeReplaceableSkill(destination, force) {
+async function removeReplaceableSkill(destination, force, skillName = SKILL_NAMES[0]) {
 	const info = await pathInfo(destination);
 	if (!info) return;
 	const replaceable =
 		(await exists(join(destination, SKILL_MANAGED_FILE))) ||
-		(await isRepzoSkill(destination));
+		(await isRepzoSkill(destination, skillName));
 	if (!force && !replaceable)
 		fail(
 			`${destination} already exists and is not managed by Repzo. Re-run with --force to replace it.`,
@@ -1657,11 +1669,11 @@ async function removeReplaceableSkill(destination, force) {
 	await rm(destination, { recursive: true, force: true });
 }
 
-async function installSharedSkill(force = false) {
-	const destination = sharedSkillDirectory();
-	await removeReplaceableSkill(destination, force);
+async function installSharedSkill(skillName, force = false) {
+	const destination = sharedSkillDirectory(skillName);
+	await removeReplaceableSkill(destination, force, skillName);
 	await mkdir(destination, { recursive: true });
-	for (const [name, contents] of Object.entries(EMBEDDED_SKILL_FILES)) {
+	for (const [name, contents] of Object.entries(EMBEDDED_SKILLS[skillName])) {
 		const path = join(destination, name);
 		await mkdir(dirname(path), { recursive: true });
 		await writeFile(path, contents);
@@ -1672,20 +1684,20 @@ async function installSharedSkill(force = false) {
 		"Managed by the Repzo CLI. Re-run `repzo setup agents` to repair this installation.\n",
 	);
 	await writeFile(join(destination, SKILL_VERSION_FILE), `${version}\n`);
-	return { destination, version };
+	return { name: skillName, destination, version };
 }
 
-async function connectAgentSkill(target, force = false) {
-	const destination = agentSkillDirectory(target);
-	const canonical = sharedSkillDirectory();
+async function connectAgentSkill(target, skillName, force = false) {
+	const destination = agentSkillDirectory(target, skillName);
+	const canonical = sharedSkillDirectory(skillName);
 	const info = await pathInfo(destination);
 	if (info?.isSymbolicLink()) {
 		try {
 			if ((await realpath(destination)) === (await realpath(canonical)))
-				return { target, destination, mode: "linked", unchanged: true };
+				return { target, skill: skillName, destination, mode: "linked", unchanged: true };
 		} catch {}
 	}
-	await removeReplaceableSkill(destination, force);
+	await removeReplaceableSkill(destination, force, skillName);
 	await mkdir(dirname(destination), { recursive: true });
 	try {
 		const linkTarget =
@@ -1697,11 +1709,12 @@ async function connectAgentSkill(target, force = false) {
 			destination,
 			process.platform === "win32" ? "junction" : "dir",
 		);
-		return { target, destination, mode: "linked", unchanged: false };
+		return { target, skill: skillName, destination, mode: "linked", unchanged: false };
 	} catch (error) {
 		await cp(canonical, destination, { recursive: true });
 		return {
 			target,
+			skill: skillName,
 			destination,
 			mode: "copied",
 			unchanged: false,
@@ -1740,16 +1753,20 @@ async function handleSetup(target, options) {
 	if (!["agents", ...Object.keys(AGENT_TARGETS)].includes(target))
 		fail("Usage: repzo setup agents|codex|claude [--force]");
 	const targets = target === "agents" ? await detectAgentTargets() : [target];
-	const shared = await installSharedSkill(options.force);
+	const sharedSkills = [];
+	for (const skillName of SKILL_NAMES) sharedSkills.push(await installSharedSkill(skillName, options.force));
 	const agents = [];
-	for (const agentTarget of targets)
-		agents.push(await connectAgentSkill(agentTarget, options.force));
+	for (const agentTarget of targets) {
+		for (const skillName of SKILL_NAMES) agents.push(await connectAgentSkill(agentTarget, skillName, options.force));
+	}
 	json({
-		shared: shared.destination,
-		version: shared.version,
+		shared: sharedSkills[0].destination,
+		sharedSkills,
+		version: sharedSkills[0].version,
 		detected: targets,
 		agents,
 		invokeWith: "$repzo-workstation",
+		skills: SKILL_NAMES.map((name) => `$${name}`),
 		restartRequired: agents.length > 0,
 		...(agents.length === 0
 			? {
@@ -1762,25 +1779,26 @@ async function handleSetup(target, options) {
 
 async function refreshInstalledSkillsIfNeeded() {
 	if (process.env.REPZO_DISABLE_SKILL_REFRESH === "1") return null;
-	const canonical = sharedSkillDirectory();
-	if (!(await isRepzoSkill(canonical))) return null;
+	const canonical = sharedSkillDirectory(SKILL_NAMES[0]);
+	if (!(await isRepzoSkill(canonical, SKILL_NAMES[0]))) return null;
 	const currentVersion = await packageVersion();
 	const installedVersion = await installedSkillVersion(canonical);
 	if (currentVersion === "unknown" || installedVersion === currentVersion)
 		return null;
 	const existingTargets = [];
 	for (const target of Object.keys(AGENT_TARGETS)) {
-		if (await pathInfo(agentSkillDirectory(target)))
+		if (await pathInfo(agentSkillDirectory(target, SKILL_NAMES[0])))
 			existingTargets.push(target);
 	}
-	await installSharedSkill(true);
+	for (const skillName of SKILL_NAMES) await installSharedSkill(skillName, true);
 	const agents = [];
-	for (const target of existingTargets)
-		agents.push(await connectAgentSkill(target, true));
+	for (const target of existingTargets) {
+		for (const skillName of SKILL_NAMES) agents.push(await connectAgentSkill(target, skillName, true));
+	}
 	return {
 		from: installedVersion,
 		to: currentVersion,
-		agents: agents.map((entry) => entry.target),
+		agents: [...new Set(agents.map((entry) => entry.target))],
 	};
 }
 
@@ -2093,40 +2111,37 @@ async function runFileUpload(path, filePath, options) {
 async function skillInstallationChecks() {
 	const checks = [];
 	const currentVersion = await packageVersion();
-	const canonical = sharedSkillDirectory();
-	const canonicalVersion = await installedSkillVersion(canonical);
-	const canonicalValid =
-		(await isRepzoSkill(canonical)) && canonicalVersion === currentVersion;
-	checks.push({
-		name: "Agent skill (shared)",
-		ok: canonicalValid,
-		detail: canonicalValid
-			? `${canonical} (${currentVersion})`
-			: canonicalVersion
-				? `${canonical} has version ${canonicalVersion}; CLI has ${currentVersion}`
-				: `${canonical} is not installed`,
-		...(canonicalValid ? {} : { hint: "Run repzo setup agents." }),
-	});
+	for (const [index, skillName] of SKILL_NAMES.entries()) {
+		const canonical = sharedSkillDirectory(skillName);
+		const canonicalVersion = await installedSkillVersion(canonical);
+		const canonicalValid = (await isRepzoSkill(canonical, skillName)) && canonicalVersion === currentVersion;
+		checks.push({
+			name: index === 0 ? "Agent skill (shared)" : `Agent skill (${skillName} shared)`,
+			ok: canonicalValid,
+			detail: canonicalValid ? `${canonical} (${currentVersion})` : canonicalVersion
+				? `${canonical} has version ${canonicalVersion}; CLI has ${currentVersion}` : `${canonical} is not installed`,
+			...(canonicalValid ? {} : { hint: "Run repzo setup agents." }),
+		});
+	}
 
 	const detected = await detectAgentTargets();
 	for (const target of Object.keys(AGENT_TARGETS)) {
-		const destination = agentSkillDirectory(target);
-		const info = await pathInfo(destination);
-		if (!detected.includes(target) && !info) continue;
-		const version = await installedSkillVersion(destination);
-		const valid =
-			(await isRepzoSkill(destination)) && version === currentVersion;
-		let mode = "missing";
-		if (info?.isSymbolicLink()) mode = "linked";
-		else if (info) mode = "copied";
-		checks.push({
-			name: `Agent skill (${target})`,
-			ok: valid,
-			detail: valid
-				? `${destination} (${mode}, ${currentVersion})`
-				: `${destination} is ${mode}${version ? ` at version ${version}` : ""}`,
-			...(valid ? {} : { hint: `Run repzo setup ${target}.` }),
-		});
+		for (const [index, skillName] of SKILL_NAMES.entries()) {
+			const destination = agentSkillDirectory(target, skillName);
+			const info = await pathInfo(destination);
+			if (!detected.includes(target) && !info) continue;
+			const version = await installedSkillVersion(destination);
+			const valid = (await isRepzoSkill(destination, skillName)) && version === currentVersion;
+			let mode = "missing";
+			if (info?.isSymbolicLink()) mode = "linked";
+			else if (info) mode = "copied";
+			checks.push({
+				name: index === 0 ? `Agent skill (${target})` : `Agent skill (${skillName} ${target})`,
+				ok: valid,
+				detail: valid ? `${destination} (${mode}, ${currentVersion})` : `${destination} is ${mode}${version ? ` at version ${version}` : ""}`,
+				...(valid ? {} : { hint: `Run repzo setup ${target}.` }),
+			});
+		}
 	}
 	if (SKILL_REFRESH_RESULT?.error)
 		checks.push({

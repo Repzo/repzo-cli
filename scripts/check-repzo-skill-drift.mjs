@@ -8,8 +8,12 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const skillRoot = join(root, "skills", "repzo-workstation");
-const requiredReferences = [
+const skillRoots = [
+	join(root, "skills", "repzo-workstation"),
+	join(root, "skills", "repzo-ai-agents"),
+];
+const requiredReferences = {
+	"repzo-workstation": [
 	"api.md",
 	"chat-messages.md",
 	"communications.md",
@@ -18,17 +22,20 @@ const requiredReferences = [
 	"reporting-data.md",
 	"sales-commerce.md",
 	"service-operations.md",
-];
+	],
+	"repzo-ai-agents": ["api.md", "playbook.md", "workflows.md"],
+};
 
 async function markdownFiles() {
-	const references = await readdir(join(skillRoot, "references"));
-	return [
-		join(skillRoot, "SKILL.md"),
-		...references
+	const files = [];
+	for (const skillRoot of skillRoots) {
+		const references = await readdir(join(skillRoot, "references"));
+		files.push(join(skillRoot, "SKILL.md"), ...references
 			.filter((name) => name.endsWith(".md"))
 			.sort()
-			.map((name) => join(skillRoot, "references", name)),
-	];
+			.map((name) => join(skillRoot, "references", name)));
+	}
+	return files;
 }
 
 function addProblem(problems, file, message) {
@@ -79,11 +86,12 @@ const problems = [];
 const checkedCommands = new Set();
 const checkedFlags = new Set();
 
-for (const name of requiredReferences) {
-	if (
-		!documents.some(({ file }) => file === join(skillRoot, "references", name))
-	)
-		problems.push(`missing required reference: references/${name}`);
+for (const skillRoot of skillRoots) {
+	const skillName = skillRoot.split("/").at(-1);
+	for (const name of requiredReferences[skillName]) {
+		if (!documents.some(({ file }) => file === join(skillRoot, "references", name)))
+			problems.push(`${skillName}: missing required reference: references/${name}`);
+	}
 }
 
 for (const { file, text } of documents) {
