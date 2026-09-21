@@ -14,6 +14,8 @@ import { join } from "node:path";
 import express from "express";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+const packageVersion = JSON.parse(await readFile("package.json", "utf8")).version;
+
 async function runCli(
 	args: string[],
 	options: { env?: Record<string, string>; input?: string } = {},
@@ -209,6 +211,23 @@ describe("Repzo CLI v2", () => {
 			exitCodes: { "3": "auth", "5": "rate_limit", "7": "api" },
 			output: { success: "raw data in --agent mode" },
 		});
+	});
+
+	it("discovers and previews bulk updates for all supported resources", async () => {
+		const resources = ["contacts", "accounts", "deals", "activities", "projects", "tickets", "invoices", "price-offers", "campaigns", "products"];
+		const body = { ids: ["11111111-1111-4111-8111-111111111111"], updates: { customProperties: { tier: "gold" } } };
+		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
+		for (const resource of resources) {
+			expect(catalog).toContainEqual(expect.objectContaining({
+				command: `${resource} bulk-update`, method: "POST", path: `/${resource}/bulk-update`, mutation: true, requiresBody: true,
+			}));
+			const preview = await runCli([resource, "bulk-update", "--data", JSON.stringify(body), "--dry-run", "--idempotency-key", `${resource}-batch-1`]);
+			expect(preview.code).toBe(0);
+			expect(JSON.parse(preview.stdout).data).toMatchObject({
+				dryRun: true, method: "POST", body, idempotencyKey: `${resource}-batch-1`,
+				url: expect.stringContaining(`/api/v1/${resource}/bulk-update`),
+			});
+		}
 	});
 
 	it("supports token-free mutation dry runs and rejects tokens in argv", async () => {
@@ -596,7 +615,7 @@ describe("Repzo CLI v2", () => {
 			).resolves.toBeUndefined();
 			expect(
 				await readFile(join(sharedSkill, ".installed-version"), "utf8"),
-			).toBe("1.0.7\n");
+			).toBe(`${packageVersion}\n`);
 		}
 	});
 
@@ -648,7 +667,7 @@ describe("Repzo CLI v2", () => {
 		expect(refreshed.code).toBe(0);
 		expect(
 			await readFile(join(sharedSkill, ".installed-version"), "utf8"),
-		).toBe("1.0.7\n");
+		).toBe(`${packageVersion}\n`);
 		expect(await readFile(join(sharedSkill, "SKILL.md"), "utf8")).toContain(
 			"Operate Workstation through the `repzo` CLI",
 		);
@@ -711,8 +730,17 @@ describe("Repzo CLI v2", () => {
 		let mutationCalls = 0;
 		let mutationIdempotencyKey: string | undefined;
 		let mutationIfMatch: string | undefined;
+		let bulkCalls: Array<{ body: unknown; key: string | undefined }> = [];
 		beforeAll(async () => {
 			const app = express();
+			app.use(express.json());
+			app.post("/api/v1/contacts/bulk-update", (req, res) => {
+				bulkCalls.push({ body: req.body, key: req.get("Idempotency-Key") });
+				res.json({ total: 2, succeeded: 1, failed: 1, results: [
+					{ id: "contact-1", success: true },
+					{ id: "contact-2", success: false, error: "Permission denied" },
+				] });
+			});
 			app.get("/api/v1/contacts", (req, res) => {
 				calls += 1;
 				const page = Number(req.query.page || 1);
@@ -777,6 +805,26 @@ describe("Repzo CLI v2", () => {
 		afterAll(async () => {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		});
+		it("requires confirmation and preserves bulk partial failures and verification breadcrumbs", async () => {
+			const body = { ids: ["contact-1", "contact-2"], updates: { rating: "warm" } };
+			const args = ["contacts", "bulk-update", "--data", JSON.stringify(body), "--idempotency-key", "bulk-batch-1"];
+			const env = { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" };
+			const before = bulkCalls.length;
+			expect((await runCli(args, { env })).code).toBe(1);
+			expect((await runCli([...args, "--dry-run"], { env })).code).toBe(0);
+			expect(bulkCalls).toHaveLength(before);
+			const result = await runCli([...args, "--yes"], { env });
+			expect(result.code).toBe(0);
+			expect(bulkCalls.at(-1)).toEqual({ body, key: "bulk-batch-1" });
+			expect(JSON.parse(result.stdout)).toMatchObject({
+				ok: true, summary: "1/2 records updated; 1 failed",
+				data: { total: 2, succeeded: 1, failed: 1, results: expect.arrayContaining([
+					{ id: "contact-2", success: false, error: "Permission denied" },
+				]) },
+				breadcrumbs: expect.arrayContaining([expect.objectContaining({ cmd: "repzo contacts get contact-1" })]),
+			});
+		});
+
 		it("fetches all offset pages", async () => {
 			const result = await runCli(
 				["contacts", "list", "--all", "--limit", "1"],
