@@ -78,3 +78,16 @@ npm run build -- --target=bun-darwin-arm64
 ```
 
 The npm package is private by design. Repzo CLI is distributed only as standalone executables from GitHub Releases.
+
+## Bulk updates
+
+Apply shared changes to 1–500 explicit record IDs:
+
+```bash
+repzo contacts bulk-update --data @bulk-update.json --dry-run --idempotency-key contact-rating-batch-1
+repzo contacts bulk-update --data @bulk-update.json --yes --idempotency-key contact-rating-batch-1
+```
+
+The body is `{ "ids": ["UUID", "UUID"], "updates": { "rating": "warm" } }`. Supported resources: contacts, accounts, deals, activities, projects, tickets, invoices, price-offers, campaigns, and products. Inspect the live OpenAPI for each resource's bulk-editable fields.
+
+The summary reports succeeded/total and failures. HTTP 200 and exit code 0 may include partial failures; inspect `data.failed` and `data.results` and verify successful records. Batches are not atomic. Use separate idempotency keys for separate batches; `--if-match` is unsupported. See the [bulk update skill reference](skills/repzo-workstation/references/bulk-updates.md) for selection and retry guidance.

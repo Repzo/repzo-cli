@@ -224,6 +224,14 @@ for (const [resource, path] of CRUD_RESOURCES) {
 	);
 }
 
+for (const resource of [
+	"contacts", "accounts", "deals", "activities", "projects", "tickets",
+	"invoices", "price-offers", "campaigns", "products",
+]) {
+	command([resource, "bulk-update"], "POST", `/${resource}/bulk-update`,
+		`Apply the same updates to 1–500 ${resource} IDs; inspect per-record failures.`, { body: true });
+}
+
 for (const name of [
 	"countries",
 	"users",
@@ -934,6 +942,11 @@ function inferBreadcrumbs(data, meta) {
 	const get = siblingCommand("get");
 	const list = siblingCommand("list");
 	const breadcrumbs = [];
+	if (action === "bulk-update" && get && Array.isArray(data?.results)) {
+		for (const record of data.results.filter((item) => item.success).slice(0, 3)) {
+			breadcrumbs.push(breadcrumb("get", renderCommand(get, record), "Verify the updated record"));
+		}
+	}
 	if (action === "list" && get) {
 		for (const record of records.slice(0, 3)) {
 			if (!record || typeof record !== "object" || !record.id) continue;
@@ -982,6 +995,8 @@ function inferSummary(data) {
 		const passed = data.checks.filter((check) => check.ok).length;
 		return `${passed}/${data.checks.length} checks passed`;
 	}
+	if (OUTPUT_CONTEXT?.item?.tokens.at(-1) === "bulk-update" && Array.isArray(data?.results))
+		return `${data.succeeded}/${data.total} records updated; ${data.failed} failed`;
 	if (data?.dryRun) return `${data.method} request previewed; nothing was sent`;
 	return (
 		OUTPUT_CONTEXT?.item?.description?.replace(/\.$/, "") || "Command completed"
@@ -1218,6 +1233,11 @@ function publicCommand(item) {
 				? ["Preview with --dry-run; sending requires --yes."]
 				: []),
 			...(item.body ? ["The request body is strict JSON."] : []),
+			...(item.tokens.at(-1) === "bulk-update" ? [
+				"Body: { ids: [UUID, ...], updates: { field: value, ... } }; 1–500 unique IDs.",
+				"HTTP success can include per-record failures: inspect failed and results. Updates are not atomic.",
+				"Use --idempotency-key for retries. --if-match is not supported.",
+			] : []),
 			...(item.pagination
 				? ["Use --all only when the complete set is required."]
 				: []),

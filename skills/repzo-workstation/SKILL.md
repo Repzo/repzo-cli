@@ -1,6 +1,6 @@
 ---
 name: repzo-workstation
-description: Inspect and operate Repzo Workstation through the bundled `repzo` CLI backed by the public REST API. Use for CRM records, contacts, accounts, deals, activities, search, timelines, comments, attachments, notifications, approvals, products, pipelines, commerce, reports, appointments, projects, tickets, requests, tags, associations, forms, segments, campaigns, content, import/export jobs, Inbox, chat, voice, Send, event subscriptions, metadata, agent setup, or API troubleshooting.
+description: Inspect and operate Repzo Workstation through the bundled `repzo` CLI backed by the public REST API. Use for bulk updates, CRM records, contacts, accounts, deals, activities, search, timelines, comments, attachments, notifications, approvals, products, pipelines, commerce, reports, appointments, projects, tickets, requests, tags, associations, forms, segments, campaigns, content, import/export jobs, Inbox, chat, voice, Send, event subscriptions, metadata, agent setup, or API troubleshooting.
 ---
 
 # Repzo Workstation
@@ -49,6 +49,7 @@ The CLI refreshes its installed skill after its version changes. After upgrading
 
 Read only the references needed for the task:
 
+- Bulk updates across supported record types: [references/bulk-updates.md](references/bulk-updates.md)
 - Contacts, accounts, deals, activities, record search, timelines, comments, attachments, tags, or associations: [references/crm-records.md](references/crm-records.md)
 - Products, pipelines, stages, price offers, carts, orders, invoices, or line items: [references/sales-commerce.md](references/sales-commerce.md)
 - Tickets, projects, appointments, request types, or approval queues/decisions: [references/service-operations.md](references/service-operations.md)
