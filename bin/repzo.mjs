@@ -519,26 +519,116 @@ command(
 	"List channel messages.",
 	{ args: ["channelId"], pagination: "cursor" },
 );
+const CHAT_BLOCKS_GOTCHAS = [
+	"Body: { body?, bodyFormat?, blocks?, attachments? }; blocks accept any Slack Block Kit block (max 50).",
+	"Block Kit problems never reject the message: inspect the response warnings array.",
+	"Interactive controls (action_id) call back only to a Developer App with an interactivity URL; use url buttons for plain links.",
+	"Block Kit reference: https://workstation.repzo.com/docs/developers/block-kit (append .md for Markdown).",
+];
+const CHAT_VIEWS_GOTCHAS = [
+	"Requires a foxa-* Developer App token; delegated foxu-* user tokens get 403.",
+	"Errors carry Slack's error name in error.details.slackError.",
+	"View problems never reject the request: inspect the response warnings array.",
+];
 command(
 	["chat", "send"],
 	"POST",
 	"/chat/channels/{channelId}/messages",
 	"Send a channel message.",
-	{ args: ["channelId"], body: true },
+	{
+		args: ["channelId"],
+		body: true,
+		gotchas: [
+			...CHAT_BLOCKS_GOTCHAS,
+			"Reuse one clientMessageId UUID when retrying the same message.",
+		],
+	},
 );
 command(
 	["chat", "messages", "update"],
 	"PATCH",
 	"/chat/messages/{id}",
 	"Edit a chat message.",
-	{ args: ["id"], body: true },
+	{ args: ["id"], body: true, gotchas: CHAT_BLOCKS_GOTCHAS },
 );
 command(
 	["chat", "messages", "delete"],
 	"DELETE",
 	"/chat/messages/{id}",
 	"Delete a chat message.",
-	{ args: ["id"] },
+	{ args: ["id"], gotchas: ["Returns 204 with no body."] },
+);
+command(
+	["chat", "ephemeral", "send"],
+	"POST",
+	"/chat/channels/{channelId}/ephemeral",
+	"Send an ephemeral message only one user sees (Slack chat.postEphemeral).",
+	{
+		args: ["channelId"],
+		body: true,
+		gotchas: [
+			"Body: { userId, body?, blocks?, attachments?, parentMessageId? }; userId must be able to read the channel.",
+			"Requires a foxa-* Developer App token; delegated foxu-* user tokens get 403.",
+			"Not stored or listed: the returned id does not work with chat messages commands; controls work for 24 hours.",
+			"Block Kit problems never reject the message: inspect the response warnings array.",
+		],
+	},
+);
+command(
+	["chat", "views", "open"],
+	"POST",
+	"/chat/views/open",
+	"Open a modal (Slack views.open).",
+	{
+		body: true,
+		gotchas: [
+			"Body: { trigger_id, view }; view.type is modal.",
+			"trigger_id comes from a block_actions or view_submission payload the app received; it expires after 60 seconds and works once.",
+			...CHAT_VIEWS_GOTCHAS,
+		],
+	},
+);
+command(
+	["chat", "views", "push"],
+	"POST",
+	"/chat/views/push",
+	"Push a view onto an open modal (Slack views.push).",
+	{
+		body: true,
+		gotchas: [
+			"Body: { trigger_id, view }; trigger_id comes from an interaction inside the open modal (60 seconds, single use).",
+			"At most 3 views per modal stack: a fourth fails with 422 push_limit_reached.",
+			...CHAT_VIEWS_GOTCHAS,
+		],
+	},
+);
+command(
+	["chat", "views", "update"],
+	"POST",
+	"/chat/views/update",
+	"Update an open view by view_id or external_id (Slack views.update).",
+	{
+		body: true,
+		gotchas: [
+			"Body: { view_id? | external_id?, hash?, view }; one of view_id or external_id is required.",
+			"Pass the view's latest hash to avoid overwriting newer changes: a stale hash fails with 409 hash_conflict.",
+			...CHAT_VIEWS_GOTCHAS,
+		],
+	},
+);
+command(
+	["chat", "views", "publish"],
+	"POST",
+	"/chat/views/publish",
+	"Publish a user's App Home tab (Slack views.publish).",
+	{
+		body: true,
+		gotchas: [
+			"Body: { user_id, view, hash? }; view.type is home and replaces that user's Home tab.",
+			"A stale hash fails with 409 hash_conflict.",
+			...CHAT_VIEWS_GOTCHAS,
+		],
+	},
 );
 
 for (const [verb, method] of [
@@ -1241,6 +1331,7 @@ function publicCommand(item) {
 			...(item.pagination
 				? ["Use --all only when the complete set is required."]
 				: []),
+			...(item.gotchas || []),
 		],
 		usage: `repzo ${item.tokens.join(" ")}${args.map((arg) => ` <${arg}>`).join("")}${item.body ? " --data <json|@file|@->" : ""}`,
 	};

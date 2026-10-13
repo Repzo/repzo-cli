@@ -58,4 +58,39 @@ describe("Repzo Workstation skill package", () => {
 		expect(chatMessages).toContain("Raw HTML is rejected");
 		expect(chatMessages).toContain("do not send internal `blocksJson`");
 	});
+
+	it("documents full Block Kit, interactivity, ephemeral messages, and views", async () => {
+		const chatMessages = await readFile(
+			"skills/repzo-workstation/references/chat-messages.md",
+			"utf8",
+		);
+		for (const outdated of [
+			"Do not send interactive action IDs",
+			"buttons are links, not callbacks",
+			"renders these Block Kit-compatible types",
+		])
+			expect(chatMessages).not.toContain(outdated);
+		expect(chatMessages).toContain("Blocks are never rejected");
+		expect(chatMessages).toContain("`warnings`");
+		expect(chatMessages).toContain("`block_actions`");
+		expect(chatMessages).toContain("interactivity URL");
+		expect(chatMessages).toContain("--dry-run");
+		for (const command of [
+			"repzo chat messages delete MESSAGE_ID",
+			"repzo chat ephemeral send CHANNEL_ID",
+			"repzo chat views open",
+			"repzo chat views push",
+			"repzo chat views update",
+			"repzo chat views publish",
+		])
+			expect(chatMessages).toContain(command);
+		expect(chatMessages).toContain("hash_conflict");
+		expect(chatMessages).toContain("60 seconds");
+		for (const url of [
+			"https://workstation.repzo.com/docs/developers/chat-apps",
+			"https://workstation.repzo.com/docs/developers/block-kit",
+			"https://workstation.repzo.com/docs/llms.txt",
+		])
+			expect(chatMessages).toContain(url);
+	});
 });

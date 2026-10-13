@@ -296,6 +296,86 @@
 		"maxCommands": 6
 	},
 	{
+		"name": "cli-chat-interactive-buttons",
+		"task": "Post the Block Kit approval message in @approval.json, which has Approve and Reject buttons with action IDs, to channel channel-1.",
+		"context": "The Repzo CLI is authenticated with a foxa-* Developer App token whose app has an interactivity URL. Sending is explicitly authorized.",
+		"tags": [
+			"cli",
+			"mutation",
+			"chat"
+		],
+		"mocks": [
+			{
+				"match": "chat send channel-1 .*--yes",
+				"output": "{\"data\":{\"id\":\"message-1\",\"channelId\":\"channel-1\",\"warnings\":[]}}"
+			}
+		],
+		"expectSequence": [
+			"^cli chat send channel-1 --data @approval\\.json --dry-run",
+			"^cli chat send channel-1 --data @approval\\.json --yes"
+		],
+		"reject": [
+			"chat ephemeral send",
+			"chat views"
+		],
+		"maxCommands": 5
+	},
+	{
+		"name": "cli-chat-ephemeral",
+		"task": "Show the message in @hint.json only to user user-7 in channel channel-1.",
+		"context": "The Repzo CLI is authenticated with a foxa-* Developer App token and sending is explicitly authorized.",
+		"tags": [
+			"cli",
+			"mutation",
+			"chat"
+		],
+		"expectSequence": [
+			"^cli chat ephemeral send channel-1 --data .*--dry-run",
+			"^cli chat ephemeral send channel-1 --data .*--yes"
+		],
+		"reject": [
+			"^cli chat send "
+		],
+		"maxCommands": 5
+	},
+	{
+		"name": "cli-chat-app-home-publish",
+		"task": "Publish the App Home view in @home.json for user user-7.",
+		"context": "The Repzo CLI is authenticated with a foxa-* Developer App token and publishing is explicitly authorized.",
+		"tags": [
+			"cli",
+			"mutation",
+			"chat"
+		],
+		"expectSequence": [
+			"^cli chat views publish --data .*--dry-run",
+			"^cli chat views publish --data .*--yes"
+		],
+		"reject": [
+			"chat views (open|push|update)",
+			"^cli chat send "
+		],
+		"maxCommands": 4
+	},
+	{
+		"name": "cli-chat-delete-message",
+		"task": "Delete chat message message-9.",
+		"context": "The Repzo CLI is available and deleting that exact message is explicitly authorized.",
+		"tags": [
+			"cli",
+			"mutation",
+			"chat"
+		],
+		"expectSequence": [
+			"^cli chat messages delete message-9 .*--dry-run",
+			"^cli chat messages delete message-9 .*--yes"
+		],
+		"reject": [
+			"chat messages delete (?!message-9)"
+		],
+		"maxCommands": 4
+	},
+	{
 		"name": "cli-voice-analytics",
 		"task": "Show voice analytics for August 2026.",
 		"context": "The Repzo CLI is available.",
