@@ -230,6 +230,67 @@ describe("Repzo CLI v2", () => {
 		}
 	});
 
+	it("discovers and previews Chat Block Kit, ephemeral, and view commands", async () => {
+		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
+		const expected = [
+			["chat messages delete", "DELETE", "/chat/messages/{id}", ["id"], false],
+			["chat ephemeral send", "POST", "/chat/channels/{channelId}/ephemeral", ["channelId"], true],
+			["chat views open", "POST", "/chat/views/open", [], true],
+			["chat views push", "POST", "/chat/views/push", [], true],
+			["chat views update", "POST", "/chat/views/update", [], true],
+			["chat views publish", "POST", "/chat/views/publish", [], true],
+		] as const;
+		for (const [command, method, path, args, requiresBody] of expected) {
+			expect(catalog).toContainEqual(expect.objectContaining({
+				command, method, path, arguments: args, requiresBody, mutation: true,
+			}));
+		}
+		const gotchas = (command: string) =>
+			catalog.find((entry: any) => entry.command === command).gotchas.join("\n");
+		expect(gotchas("chat send")).toContain("warnings");
+		expect(gotchas("chat ephemeral send")).toContain("Developer App token");
+		expect(gotchas("chat views open")).toContain("60 seconds");
+		expect(gotchas("chat views push")).toContain("push_limit_reached");
+		expect(gotchas("chat views update")).toContain("hash_conflict");
+		expect(gotchas("chat views publish")).toContain("slackError");
+
+		const blocks = [
+			{ type: "section", text: { type: "mrkdwn", text: "*Refund* request" } },
+			{ type: "actions", elements: [{ type: "button", action_id: "approve", text: { type: "plain_text", text: "Approve" }, value: "refund-42" }] },
+		];
+		const view = { type: "modal", title: { type: "plain_text", text: "Refund" }, blocks };
+		const previews: Array<[string[], unknown, string, string]> = [
+			[["chat", "send", "channel-1"], { body: "Refund request", blocks }, "POST", "/api/v1/chat/channels/channel-1/messages"],
+			[["chat", "ephemeral", "send", "channel-1"], { userId: "user-1", blocks }, "POST", "/api/v1/chat/channels/channel-1/ephemeral"],
+			[["chat", "views", "open"], { trigger_id: "trigger-1", view }, "POST", "/api/v1/chat/views/open"],
+			[["chat", "views", "push"], { trigger_id: "trigger-2", view }, "POST", "/api/v1/chat/views/push"],
+			[["chat", "views", "update"], { view_id: "view-1", hash: "hash-1", view }, "POST", "/api/v1/chat/views/update"],
+			[["chat", "views", "publish"], { user_id: "user-1", view: { type: "home", blocks } }, "POST", "/api/v1/chat/views/publish"],
+			[["chat", "messages", "delete", "message-1"], undefined, "DELETE", "/api/v1/chat/messages/message-1"],
+		];
+		for (const [args, body, method, path] of previews) {
+			const result = await runCli([
+				...args,
+				...(body === undefined ? [] : ["--data", JSON.stringify(body)]),
+				"--dry-run",
+			]);
+			expect(result.code).toBe(0);
+			const data = JSON.parse(result.stdout).data;
+			expect(data).toMatchObject({ dryRun: true, method });
+			expect(new URL(data.url).pathname).toBe(path);
+			expect(data.body).toEqual(body);
+		}
+
+		const missingBody = await runCli(["chat", "views", "open", "--dry-run"]);
+		expect(missingBody.code).toBe(1);
+		expect(JSON.parse(missingBody.stderr).error.message).toContain("requires --data");
+		const missingChannel = await runCli(["chat", "ephemeral", "send", "--data", "{}", "--dry-run"]);
+		expect(missingChannel.code).toBe(1);
+		expect(JSON.parse(missingChannel.stderr).error.message).toContain(
+			"repzo chat ephemeral send <channelId> --data",
+		);
+	});
+
 	it("supports token-free mutation dry runs and rejects tokens in argv", async () => {
 		const dryRun = await runCli([
 			"contacts",
@@ -731,6 +792,7 @@ describe("Repzo CLI v2", () => {
 		let mutationIdempotencyKey: string | undefined;
 		let mutationIfMatch: string | undefined;
 		let bulkCalls: Array<{ body: unknown; key: string | undefined }> = [];
+		const chatCalls: Array<{ path: string; body: unknown }> = [];
 		beforeAll(async () => {
 			const app = express();
 			app.use(express.json());
@@ -788,6 +850,24 @@ describe("Repzo CLI v2", () => {
 				res
 					.status(503)
 					.json({ error: { code: "unavailable", message: "Try later" } });
+			});
+			app.post("/api/v1/chat/channels/:id/ephemeral", (req, res) => {
+				chatCalls.push({ path: req.path, body: req.body });
+				res.status(201).json({
+					id: "ephemeral-1", channelId: req.params.id, userId: req.body.userId,
+					parentMessageId: null, createdAt: "2026-10-12T00:00:00.000Z",
+					warnings: ["blocks[1]: unsupported element skipped"],
+				});
+			});
+			app.post("/api/v1/chat/views/update", (req, res) => {
+				chatCalls.push({ path: req.path, body: req.body });
+				res.status(409).json({
+					error: { code: "conflict", message: "The view changed since this hash.", details: { slackError: "hash_conflict" } },
+				});
+			});
+			app.delete("/api/v1/chat/messages/:id", (req, res) => {
+				chatCalls.push({ path: req.path, body: undefined });
+				res.status(204).end();
 			});
 			app.post("/api/v1/reports/execute", (_req, res) => {
 				res.json({ data: [{ total: 3 }] });
@@ -917,6 +997,36 @@ describe("Repzo CLI v2", () => {
 			expect(result.code).toBe(7);
 			expect(mutationCalls).toBe(1);
 			expect(mutationIdempotencyKey).toBe("contact-create-maya-1");
+		});
+
+		it("sends Chat ephemeral, view, and delete mutations with structured results", async () => {
+			const env = { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" };
+			const before = chatCalls.length;
+			const ephemeralBody = { userId: "user-1", body: "Only you", blocks: [{ type: "section", text: { type: "mrkdwn", text: "Only *you*" } }] };
+			const unconfirmed = await runCli(["chat", "ephemeral", "send", "channel-1", "--data", JSON.stringify(ephemeralBody)], { env });
+			expect(unconfirmed.code).toBe(1);
+			expect(chatCalls).toHaveLength(before);
+
+			const ephemeral = await runCli(["chat", "ephemeral", "send", "channel-1", "--data", JSON.stringify(ephemeralBody), "--yes"], { env });
+			expect(ephemeral.code).toBe(0);
+			expect(chatCalls.at(-1)).toEqual({ path: "/api/v1/chat/channels/channel-1/ephemeral", body: ephemeralBody });
+			expect(JSON.parse(ephemeral.stdout).data).toMatchObject({
+				id: "ephemeral-1", userId: "user-1", warnings: ["blocks[1]: unsupported element skipped"],
+			});
+
+			const stale = await runCli([
+				"chat", "views", "update", "--data", JSON.stringify({ view_id: "view-1", hash: "old", view: { type: "modal", blocks: [] } }), "--yes", "--no-retry",
+			], { env });
+			expect(stale.code).toBe(7);
+			expect(JSON.parse(stale.stderr)).toMatchObject({
+				ok: false,
+				error: { status: 409, details: { slackError: "hash_conflict" } },
+			});
+
+			const deleted = await runCli(["chat", "messages", "delete", "message-1", "--yes"], { env });
+			expect(deleted.code).toBe(0);
+			expect(chatCalls.at(-1)).toEqual({ path: "/api/v1/chat/messages/message-1", body: undefined });
+			expect(JSON.parse(deleted.stdout)).toMatchObject({ ok: true, data: { status: 204 } });
 		});
 
 		it("executes read-only POST commands without mutation confirmation", async () => {
