@@ -30,7 +30,7 @@ jobs:
 
   build:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ${{ startsWith(matrix.target, 'bun-darwin-') && 'macos-14' || 'ubuntu-latest' }}
     timeout-minutes: 25
     permissions:
       contents: read
@@ -144,4 +144,7 @@ jobs:
           fi
           test -n "$expected" && test "$expected" = "$actual"
           chmod +x "$asset"
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            codesign --verify --strict --verbose=2 "$asset"
+          fi
           test "$(./$asset --version)" = "$version"
