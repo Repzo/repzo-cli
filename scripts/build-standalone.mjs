@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +26,10 @@ if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
 	throw new Error(`Invalid CLI version: ${version}`);
 }
 
+if (target.startsWith("bun-darwin-") && process.platform !== "darwin") {
+	throw new Error("Build macOS executables on macOS so codesign can sign and verify them.");
+}
+
 await mkdir(outDir, { recursive: true });
 
 await new Promise((resolveBuild, rejectBuild) => {
@@ -49,5 +53,12 @@ await new Promise((resolveBuild, rejectBuild) => {
 			: rejectBuild(new Error(`bun build exited with ${code}`)),
 	);
 });
+
+if (target.startsWith("bun-darwin-")) {
+	// Bun's compiled output can retain an invalid signature from its runtime.
+	// Sign the final executable before release checksums are generated.
+	execFileSync("codesign", ["--force", "--sign", "-", outfile], { stdio: "inherit" });
+	execFileSync("codesign", ["--verify", "--strict", "--verbose=2", outfile], { stdio: "inherit" });
+}
 
 console.log(outfile);

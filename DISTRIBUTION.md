@@ -10,6 +10,8 @@ The CLI is built and released entirely from the public [`Repzo/repzo-cli`](https
 
 The tag workflow runs the CLI, skill, installer, and distribution tests; compiles five Bun executables; creates SHA-256 checksums; signs the checksum manifest with keyless Sigstore; attests build provenance; and publishes the GitHub release. Linux, macOS, and Windows runners then download and execute the published binaries.
 
+macOS executables must be built on macOS. The build script applies and verifies an ad-hoc code signature before checksums are generated; the macOS release verification checks that signature again after downloading. This code signature is separate from the Sigstore signature on the checksum manifest and does not provide Apple notarization.
+
 No cross-repository token is required. The workflow publishes with this repository's short-lived `GITHUB_TOKEN`.
 
 ## Installers
