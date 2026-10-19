@@ -641,5 +641,54 @@
 			"tickets (create|update|delete)"
 		],
 		"maxCommands": 2
+	},
+	{
+		"name": "cli-account-merge",
+		"task": "Merge the duplicate account acct-2 into acct-1.",
+		"context": "The Repzo CLI is available. The user explicitly authorizes the merge and chose acct-1 as the account to keep.",
+		"tags": [
+			"cli",
+			"mutation",
+			"duplicates"
+		],
+		"mocks": [
+			{
+				"match": "accounts merge preview",
+				"output": "{\"data\": {\"preview\": true, \"primaryId\": \"acct-1\", \"mergedIds\": [\"acct-2\"], \"record\": {\"id\": \"acct-1\", \"name\": \"Acme\"}, \"sources\": {\"properties\": {\"name\": \"acct-1\"}, \"customProperties\": {}}, \"movedRecords\": {\"contacts\": 2}, \"versions\": {\"acct-1\": \"v1\", \"acct-2\": \"v2\"}}}"
+			},
+			{
+				"match": "accounts merge (?!preview).*--yes",
+				"output": "{\"data\": {\"preview\": false, \"primaryId\": \"acct-1\", \"mergedIds\": [\"acct-2\"], \"record\": {\"id\": \"acct-1\", \"name\": \"Acme\"}, \"sources\": {\"properties\": {\"name\": \"acct-1\"}, \"customProperties\": {}}, \"movedRecords\": {\"contacts\": 2}, \"versions\": {\"acct-1\": \"v1\", \"acct-2\": \"v2\"}}}"
+			}
+		],
+		"expectSequence": [
+			"^cli accounts merge preview .*acct-1.*acct-2",
+			"^cli accounts merge (?!preview).*versions.*--yes",
+			"^cli accounts get acct-1"
+		],
+		"reject": [
+			"accounts delete",
+			"accounts update"
+		],
+		"maxCommands": 6
+	},
+	{
+		"name": "cli-contact-duplicates-review",
+		"task": "Show me which contacts look like duplicates.",
+		"context": "The Repzo CLI is available. The user only wants a list; nothing should change.",
+		"tags": [
+			"cli",
+			"read",
+			"duplicates"
+		],
+		"accept": [
+			"^cli contacts duplicates list"
+		],
+		"reject": [
+			"merge(?! preview)",
+			"duplicates reject",
+			"--yes"
+		],
+		"maxCommands": 3
 	}
 ]

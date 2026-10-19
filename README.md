@@ -91,3 +91,15 @@ repzo contacts bulk-update --data @bulk-update.json --yes --idempotency-key cont
 The body is `{ "ids": ["UUID", "UUID"], "updates": { "rating": "warm" } }`. Supported resources: contacts, accounts, deals, activities, projects, tickets, invoices, price-offers, campaigns, and products. Inspect the live OpenAPI for each resource's bulk-editable fields.
 
 The summary reports succeeded/total and failures. HTTP 200 and exit code 0 may include partial failures; inspect `data.failed` and `data.results` and verify successful records. Batches are not atomic. Use separate idempotency keys for separate batches; `--if-match` is unsupported. See the [bulk update skill reference](skills/repzo-workstation/references/bulk-updates.md) for selection and retry guidance.
+
+## Duplicates and merging
+
+Review the workspace's duplicate suggestions for accounts or contacts, then merge records into a primary one:
+
+```bash
+repzo accounts duplicates list --limit 20
+repzo accounts merge preview --data @merge.json
+repzo accounts merge --data @merge.json --yes --idempotency-key merge-acme-1
+```
+
+The body is `{ "primaryId": "UUID", "mergeIds": ["UUID"], "properties": { "phone": "UUID" }, "versions": { … } }`. `merge preview` runs the full merge and rolls it back, so it needs no `--yes`; send its `versions` with the real merge so a record that changed in between fails with 409. Merged records are archived and there is no unmerge. `repzo accounts duplicates reject <id>` marks a suggestion as not a duplicate. See the [duplicates skill reference](skills/repzo-workstation/references/duplicates.md).
