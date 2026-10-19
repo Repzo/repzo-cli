@@ -32,7 +32,7 @@ repzo contacts create --data @contact.json --yes --idempotency-key contact-impor
 
 Never reuse an idempotency key for different request data. The API returns `409 conflict` when a key is reused with a different method, path, query, or body.
 
-Direct record reads expose the current version as `meta.etag` in normal CLI output. Use it when a write depends on the state you just inspected:
+Direct record reads expose the current version as a strong `meta.etag` in normal CLI output. The CLI removes a proxy-added `W/` prefix from the response ETag and from each `--if-match` candidate, preserving the quoted digest. With older CLI versions, strip only a leading `W/` yourself. Use the tag when a write depends on the state you just inspected:
 
 ```bash
 repzo deals get DEAL_ID

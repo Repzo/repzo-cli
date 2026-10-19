@@ -2047,9 +2047,15 @@ async function requestJson(url, init, options) {
 	const output = result ?? { ok: true, status: response.status };
 	if (output && typeof output === "object") {
 		const etag = response.headers.get("etag");
-		if (etag) RESPONSE_META.set(output, { etag });
+		if (etag) RESPONSE_META.set(output, { etag: normalizeRecordEtag(etag) });
 	}
 	return output;
+}
+
+// Repzo record validators hash id + updatedAt; proxy compression may add W/
+// without changing that version. Keep the quoted digest intact.
+function normalizeRecordEtag(etag) {
+	return etag.trim().replace(/^W\//, "");
 }
 
 async function runApi(method, path, body, options, pagination, mutation) {
@@ -2067,6 +2073,7 @@ async function runApi(method, path, body, options, pagination, mutation) {
 		if (options[name] !== undefined)
 			url.searchParams.set(name, String(options[name]));
 	const mutating = mutation ?? !["GET", "HEAD", "OPTIONS"].includes(method);
+	const ifMatch = options["if-match"]?.split(",").map(normalizeRecordEtag).join(", ");
 	if (options["idempotency-key"] && !/^[A-Za-z0-9._:-]{1,255}$/.test(options["idempotency-key"]))
 		fail("--idempotency-key must be 1-255 characters using letters, numbers, '.', '_', ':', or '-'.");
 	if (mutating && options["dry-run"]) {
@@ -2078,7 +2085,7 @@ async function runApi(method, path, body, options, pagination, mutation) {
 				url: url.toString(),
 				body,
 				...(options["idempotency-key"] ? { idempotencyKey: options["idempotency-key"] } : {}),
-				...(options["if-match"] ? { ifMatch: options["if-match"] } : {}),
+				...(ifMatch ? { ifMatch } : {}),
 			},
 			options.compact,
 		);
@@ -2117,7 +2124,7 @@ async function runApi(method, path, body, options, pagination, mutation) {
 			...(profile.token ? { Authorization: `Bearer ${profile.token}` } : {}),
 			...(body !== undefined ? { "Content-Type": "application/json" } : {}),
 			...(mutating && options["idempotency-key"] ? { "Idempotency-Key": options["idempotency-key"] } : {}),
-			...(mutating && options["if-match"] ? { "If-Match": options["if-match"] } : {}),
+			...(mutating && ifMatch ? { "If-Match": ifMatch } : {}),
 		},
 		...(body !== undefined ? { body: JSON.stringify(body) } : {}),
 	};
