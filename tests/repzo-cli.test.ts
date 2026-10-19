@@ -230,6 +230,29 @@ describe("Repzo CLI v2", () => {
 		}
 	});
 
+	it("discovers duplicate and merge commands for accounts and contacts", async () => {
+		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
+		for (const resource of ["accounts", "contacts"]) {
+			for (const [command, method, path, args, mutation, requiresBody] of [
+				["duplicates list", "GET", "/duplicates", [], false, false],
+				["duplicates scan", "POST", "/duplicates/scan", [], true, false],
+				["duplicates reject", "POST", "/duplicates/{id}/reject", ["id"], true, false],
+				["merge preview", "POST", "/merge/preview", [], false, true],
+				["merge", "POST", "/merge", [], true, true],
+			] as const) {
+				expect(catalog).toContainEqual(expect.objectContaining({
+					command: `${resource} ${command}`, method, path: `/${resource}${path}`, arguments: args, mutation, requiresBody,
+				}));
+			}
+		}
+		const body = { primaryId: "acct-1", mergeIds: ["acct-2"] };
+		const preview = await runCli(["accounts", "merge", "--data", JSON.stringify(body), "--dry-run"]);
+		expect(preview.code).toBe(0);
+		expect(JSON.parse(preview.stdout).data).toMatchObject({
+			dryRun: true, method: "POST", body, url: expect.stringContaining("/api/v1/accounts/merge"),
+		});
+	});
+
 	it("discovers and previews Chat Block Kit, ephemeral, and view commands", async () => {
 		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
 		const expected = [
@@ -793,9 +816,18 @@ describe("Repzo CLI v2", () => {
 		let mutationIfMatch: string | undefined;
 		let bulkCalls: Array<{ body: unknown; key: string | undefined }> = [];
 		const chatCalls: Array<{ path: string; body: unknown }> = [];
+		const mergeCalls: Array<{ path: string; body: unknown }> = [];
 		beforeAll(async () => {
 			const app = express();
 			app.use(express.json());
+			app.post(["/api/v1/accounts/merge", "/api/v1/accounts/merge/preview"], (req, res) => {
+				mergeCalls.push({ path: req.path, body: req.body });
+				res.json({
+					preview: req.path.endsWith("/preview"), primaryId: "acct-1", mergedIds: ["acct-2"],
+					record: { id: "acct-1", name: "Acme" }, sources: { properties: {}, customProperties: {} },
+					movedRecords: { contacts: 2 }, versions: { "acct-1": "v1", "acct-2": "v2" },
+				});
+			});
 			app.post("/api/v1/contacts/bulk-update", (req, res) => {
 				bulkCalls.push({ body: req.body, key: req.get("Idempotency-Key") });
 				res.json({ total: 2, succeeded: 1, failed: 1, results: [
@@ -885,6 +917,30 @@ describe("Repzo CLI v2", () => {
 		afterAll(async () => {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		});
+		it("previews merges without confirmation and requires --yes to merge", async () => {
+			const env = { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" };
+			const body = { primaryId: "acct-1", mergeIds: ["acct-2"] };
+			const preview = await runCli(["accounts", "merge", "preview", "--data", JSON.stringify(body)], { env });
+			expect(preview.code).toBe(0);
+			expect(mergeCalls.at(-1)).toEqual({ path: "/api/v1/accounts/merge/preview", body });
+			expect(JSON.parse(preview.stdout)).toMatchObject({
+				ok: true,
+				summary: "Merge preview: 1 record(s) into acct-1; nothing was saved",
+				data: { preview: true, versions: { "acct-1": "v1", "acct-2": "v2" } },
+			});
+
+			const calls = mergeCalls.length;
+			const merge = ["accounts", "merge", "--data", JSON.stringify({ ...body, versions: { "acct-1": "v1", "acct-2": "v2" } })];
+			expect((await runCli(merge, { env })).code).toBe(1);
+			expect(mergeCalls).toHaveLength(calls);
+			const merged = await runCli([...merge, "--yes"], { env });
+			expect(merged.code).toBe(0);
+			expect(mergeCalls.at(-1)?.path).toBe("/api/v1/accounts/merge");
+			const output = JSON.parse(merged.stdout);
+			expect(output.summary).toBe("Merged 1 record(s) into acct-1");
+			expect(output.breadcrumbs).toContainEqual(expect.objectContaining({ cmd: "repzo accounts get acct-1" }));
+		});
+
 		it("requires confirmation and preserves bulk partial failures and verification breadcrumbs", async () => {
 			const body = { ids: ["contact-1", "contact-2"], updates: { rating: "warm" } };
 			const args = ["contacts", "bulk-update", "--data", JSON.stringify(body), "--idempotency-key", "bulk-batch-1"];

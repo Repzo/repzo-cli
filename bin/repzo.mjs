@@ -232,6 +232,35 @@ for (const resource of [
 		`Apply the same updates to 1–500 ${resource} IDs; inspect per-record failures.`, { body: true });
 }
 
+const MERGE_BODY_GOTCHA =
+	"Body: { primaryId, mergeIds: [1–4 IDs], properties?: { field: recordId }, customProperties?: { name: recordId }, versions?: { recordId: version } }.";
+for (const resource of ["accounts", "contacts"]) {
+	command([resource, "duplicates", "list"], "GET", `/${resource}/duplicates`,
+		`List suggested duplicate ${resource} pairs with both full records and their versions.`, {
+			pagination: "offset",
+			gotchas: ["Filter with --query status=pending|rejected, --query reason=email|phone|domain|name|rule:RULE_ID, and --query q=TEXT. Default lists every reason."],
+		});
+	command([resource, "duplicates", "scan"], "POST", `/${resource}/duplicates/scan`,
+		`Queue a fresh duplicate scan of ${resource}; poll duplicates list for scan.status.`);
+	command([resource, "duplicates", "reject"], "POST", `/${resource}/duplicates/{id}/reject`,
+		"Mark a duplicate suggestion as not a duplicate so scans stop suggesting it.", { args: ["id"] });
+	command([resource, "merge", "preview"], "POST", `/${resource}/merge/preview`,
+		`Preview merging ${resource} into a primary record; runs every check, saves nothing.`, {
+			body: true,
+			mutation: false,
+			gotchas: [MERGE_BODY_GOTCHA, "Returns the resulting record, value sources, movedRecords, and current versions to send with the merge."],
+		});
+	command([resource, "merge"], "POST", `/${resource}/merge`,
+		`Merge 1–4 ${resource} into a primary record. Merged records are archived; there is no unmerge.`, {
+			body: true,
+			gotchas: [
+				MERGE_BODY_GOTCHA,
+				`Run ${resource} merge preview with the same body first, then send its versions so a changed record fails with 409.`,
+				"Unpicked properties keep the primary's value; the primary's empty values are filled from the merged records.",
+			],
+		});
+}
+
 for (const name of [
 	"countries",
 	"users",
@@ -1032,6 +1061,9 @@ function inferBreadcrumbs(data, meta) {
 	const get = siblingCommand("get");
 	const list = siblingCommand("list");
 	const breadcrumbs = [];
+	if (action === "merge" && data?.primaryId && get) {
+		breadcrumbs.push(breadcrumb("get", renderCommand(get, { id: data.primaryId }), "Verify the merged primary record"));
+	}
 	if (action === "bulk-update" && get && Array.isArray(data?.results)) {
 		for (const record of data.results.filter((item) => item.success).slice(0, 3)) {
 			breadcrumbs.push(breadcrumb("get", renderCommand(get, record), "Verify the updated record"));
@@ -1085,6 +1117,10 @@ function inferSummary(data) {
 		const passed = data.checks.filter((check) => check.ok).length;
 		return `${passed}/${data.checks.length} checks passed`;
 	}
+	if (OUTPUT_CONTEXT?.item?.tokens.at(-2) === "merge" && data?.preview === true && data.primaryId)
+		return `Merge preview: ${data.mergedIds?.length ?? 0} record(s) into ${data.primaryId}; nothing was saved`;
+	if (OUTPUT_CONTEXT?.item?.tokens.at(-1) === "merge" && data?.preview === false && data.primaryId)
+		return `Merged ${data.mergedIds?.length ?? 0} record(s) into ${data.primaryId}`;
 	if (OUTPUT_CONTEXT?.item?.tokens.at(-1) === "bulk-update" && Array.isArray(data?.results))
 		return `${data.succeeded}/${data.total} records updated; ${data.failed} failed`;
 	if (data?.dryRun) return `${data.method} request previewed; nothing was sent`;
