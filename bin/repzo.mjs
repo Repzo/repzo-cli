@@ -238,7 +238,7 @@ for (const resource of ["accounts", "contacts"]) {
 	command([resource, "duplicates", "list"], "GET", `/${resource}/duplicates`,
 		`List suggested duplicate ${resource} pairs with both full records and their versions.`, {
 			pagination: "offset",
-			gotchas: ["Filter with --query status=pending|rejected|merged, --query reason=email|phone|domain|name, and --query q=TEXT."],
+			gotchas: ["Filter with --query status=pending|rejected, --query reason=email|phone|domain|name|rule:RULE_ID, and --query q=TEXT. Default lists every reason."],
 		});
 	command([resource, "duplicates", "scan"], "POST", `/${resource}/duplicates/scan`,
 		`Queue a fresh duplicate scan of ${resource}; poll duplicates list for scan.status.`);

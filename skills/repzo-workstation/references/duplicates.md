@@ -11,7 +11,7 @@ repzo accounts duplicates list --limit 20
 repzo contacts duplicates list --query 'reason=email' --query 'q=Acme' --limit 20
 ```
 
-`--query status=rejected` or `status=merged` lists resolved suggestions. With `--json`, `meta.response.scan` shows the latest scan; start a fresh one when it is missing or old, then list again once `scan.status` is `complete`:
+`--query status=rejected` lists pairs marked as not duplicates; merged pairs leave the list. `--query reason=rule:RULE_ID` narrows to one admin rule. With `--json`, `meta.response.scan` shows the latest scan; start a fresh one when it is missing or old, then list again once `scan.status` is `complete`:
 
 ```bash
 repzo accounts duplicates scan --dry-run
