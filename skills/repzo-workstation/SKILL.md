@@ -15,7 +15,7 @@ Operate Workstation through the `repzo` CLI and public `/api/v1` contract. From 
 4. Put custom values under `customProperties`, keyed by stable property name. Use ISO-2 country codes.
 5. For mutations, run `--dry-run` first, inspect the method, URL, and body, then repeat with `--yes` only when they match the request.
 6. For a mutation that may be retried, add one stable `--idempotency-key` and reuse that exact key only for the same method, path, query, and body.
-7. When protecting a read-modify-write, reuse the exact `meta.etag` from the latest `get` as `--if-match`; on `412`, re-read instead of overwriting.
+7. When protecting a read-modify-write, reuse `meta.etag` from the latest `get` as `--if-match`, including its quotes. The CLI strips any proxy-added `W/` prefix; on `412`, re-read instead of overwriting.
 8. Re-read every changed record and report its ID and meaningful changes.
 9. Paginate deliberately. Use `--all` only when the task requires the complete set.
 10. Branch on structured `error.code` or CLI exit code. On `422`, inspect details and metadata instead of guessing.

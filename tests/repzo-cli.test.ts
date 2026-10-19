@@ -837,7 +837,7 @@ describe("Repzo CLI v2", () => {
 					});
 					return;
 				}
-				res.setHeader("ETag", '"contact-version-1"');
+				res.setHeader("ETag", req.params.id === "weak-etag" ? 'W/"contact-version-1"' : '"contact-version-1"');
 				res.json({ data: { id: req.params.id, name: "Maya" } });
 			});
 			app.patch("/api/v1/contacts/:id", (req, res) => {
@@ -960,17 +960,33 @@ describe("Repzo CLI v2", () => {
 			}
 		});
 
-		it("surfaces response ETags and sends If-Match on guarded writes", async () => {
-			const read = await runCli(["contacts", "get", "contact-1"], {
+		it.each(["contact-1", "weak-etag"])("surfaces strong meta.etag and reuses it on guarded writes (%s)", async (id) => {
+			const read = await runCli(["contacts", "get", id], {
 				env: { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" },
 			});
 			expect(JSON.parse(read.stdout)).toMatchObject({ meta: { etag: '"contact-version-1"' } });
 			mutationIfMatch = undefined;
 			const write = await runCli([
-				"contacts", "update", "contact-1", "--data", '{"firstName":"Updated"}', "--yes", "--if-match", '"contact-version-1"',
+				"contacts", "update", id, "--data", '{"firstName":"Updated"}', "--yes", "--if-match", JSON.parse(read.stdout).meta.etag,
 			], { env: { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" } });
 			expect(write.code).toBe(0);
 			expect(mutationIfMatch).toBe('"contact-version-1"');
+		});
+
+		it.each([
+			['W/"contact-version-1"', '"contact-version-1"'],
+			[' "stale", W/"older",  W/"contact-version-1" ', '"stale", "older", "contact-version-1"'],
+			['*', '*'],
+		])("normalizes If-Match %s in both previews and requests", async (ifMatch, expected) => {
+			const env = { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" };
+			const args = ["contacts", "update", "contact-1", "--data", '{"firstName":"Updated"}', "--if-match", ifMatch];
+			const preview = await runCli([...args, "--dry-run"], { env });
+			expect(preview.code).toBe(0);
+			expect(JSON.parse(preview.stdout)).toMatchObject({ data: { ifMatch: expected } });
+			mutationIfMatch = undefined;
+			const write = await runCli([...args, "--yes"], { env });
+			expect(write.code).toBe(0);
+			expect(mutationIfMatch).toBe(expected);
 		});
 
 		it("uses the network exit code when the API cannot be reached", async () => {
