@@ -103,3 +103,16 @@ repzo accounts merge --data @merge.json --yes --idempotency-key merge-acme-1
 ```
 
 The body is `{ "primaryId": "UUID", "mergeIds": ["UUID"], "properties": { "phone": "UUID" }, "versions": { … } }`. `merge preview` runs the full merge and rolls it back, so it needs no `--yes`; send its `versions` with the real merge so a record that changed in between fails with 409. Merged records are archived and there is no unmerge. `repzo accounts duplicates reject <id>` marks a suggestion as not a duplicate. See the [duplicates skill reference](skills/repzo-workstation/references/duplicates.md).
+
+## Email templates
+
+Create and edit the reusable email templates in Settings → Email templates. Send an Unlayer design and the server builds the HTML, or send your own HTML and the server wraps it in a one-block design so the editor can still open it:
+
+```bash
+repzo email-templates create --data '{"name":"Welcome","subject":"Hi {{contact.firstName}}","designJson":{…}}' --dry-run
+repzo email-templates create --data '{"name":"Order shipped","bodyHtml":"<table role=\"presentation\">…</table>"}' --dry-run
+repzo email-templates update TEMPLATE_ID --data @change.json --if-match '"ETAG"' --yes
+repzo email-templates clone TEMPLATE_ID --data '{"name":"Welcome (copy)"}' --yes
+```
+
+The server builds HTML only for text, heading, button, divider, image, and html blocks, and rejects other block types with 422. Pass the `meta.etag` from `get` as `--if-match` so an edit made in the editor meanwhile is not overwritten. See the [email templates skill reference](skills/repzo-workstation/references/email-templates.md) for a full design and an HTML example.

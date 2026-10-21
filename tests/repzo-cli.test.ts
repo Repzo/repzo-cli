@@ -253,6 +253,41 @@ describe("Repzo CLI v2", () => {
 		});
 	});
 
+	it("discovers email template commands and previews design and HTML bodies", async () => {
+		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
+		for (const [command, method, path, args, mutation, requiresBody] of [
+			["list", "GET", "", [], false, false],
+			["get", "GET", "/{id}", ["id"], false, false],
+			["create", "POST", "", [], true, true],
+			["update", "PATCH", "/{id}", ["id"], true, true],
+			["delete", "DELETE", "/{id}", ["id"], true, false],
+			["clone", "POST", "/{id}/clone", ["id"], true, false],
+		] as const) {
+			expect(catalog).toContainEqual(expect.objectContaining({
+				command: `email-templates ${command}`, method, path: `/email-templates${path}`, arguments: args, mutation, requiresBody,
+			}));
+		}
+		const create = catalog.find((entry: { command: string }) => entry.command === "email-templates create");
+		expect(create.gotchas.join(" ")).toContain("designJson");
+		expect(create.gotchas.join(" ")).toContain("bodyHtml");
+
+		for (const body of [
+			{ name: "Welcome", designJson: { body: { rows: [] } } },
+			{ name: "Shipped", bodyHtml: "<p>Hi {{contact.firstName}}</p>" },
+		]) {
+			const preview = await runCli(["email-templates", "create", "--data", JSON.stringify(body), "--dry-run"]);
+			expect(preview.code).toBe(0);
+			expect(JSON.parse(preview.stdout).data).toMatchObject({
+				dryRun: true, method: "POST", body, url: expect.stringContaining("/api/v1/email-templates"),
+			});
+		}
+		const clone = await runCli(["email-templates", "clone", "tpl-1", "--dry-run"]);
+		expect(clone.code).toBe(0);
+		expect(JSON.parse(clone.stdout).data).toMatchObject({
+			dryRun: true, method: "POST", url: expect.stringContaining("/api/v1/email-templates/tpl-1/clone"),
+		});
+	});
+
 	it("discovers and previews Chat Block Kit, ephemeral, and view commands", async () => {
 		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
 		const expected = [
