@@ -174,6 +174,7 @@ const CRUD_RESOURCES = [
 	["carts", "/carts"],
 	["contacts", "/contacts"],
 	["deals", "/deals"],
+	["email-templates", "/email-templates"],
 	["forms", "/forms"],
 	["invoices", "/invoices"],
 	["line-items", "/line-items"],
@@ -190,13 +191,28 @@ const CRUD_RESOURCES = [
 	["articles", "/content/articles"],
 ];
 
+const EMAIL_TEMPLATE_BODY_GOTCHAS = [
+	"Body: { name, subject?, designJson?, bodyHtml? }. designJson is the Unlayer design the Settings → Email templates editor opens.",
+	"Send designJson without bodyHtml and the server builds the HTML; it supports only text, heading, button, divider, image, and html blocks and returns 422 for others.",
+	"Send bodyHtml without designJson and the server wraps it in a one-block design so the editor can still open it.",
+];
+const CRUD_GOTCHAS = {
+	"email-templates": {
+		create: EMAIL_TEMPLATE_BODY_GOTCHAS,
+		update: [...EMAIL_TEMPLATE_BODY_GOTCHAS, "Get the template first and pass its meta.etag as --if-match so an edit made in the editor meanwhile is not overwritten."],
+		list: ["Items are summaries without bodyHtml or designJson; get one template for those. Search names with --query q=TEXT."],
+	},
+};
+
 const COMMANDS = [];
 function command(tokens, method, path, description, options = {}) {
 	COMMANDS.push({ tokens, method, path, description, ...options });
 }
 for (const [resource, path] of CRUD_RESOURCES) {
+	const gotchas = (action) => (CRUD_GOTCHAS[resource]?.[action] ? { gotchas: CRUD_GOTCHAS[resource][action] } : {});
 	command([resource, "list"], "GET", path, `List ${resource}.`, {
 		pagination: "offset",
+		...gotchas("list"),
 	});
 	command(
 		[resource, "get"],
@@ -207,13 +223,14 @@ for (const [resource, path] of CRUD_RESOURCES) {
 	);
 	command([resource, "create"], "POST", path, `Create a ${resource} record.`, {
 		body: true,
+		...gotchas("create"),
 	});
 	command(
 		[resource, "update"],
 		"PATCH",
 		`${path}/{id}`,
 		`Update a ${resource} record.`,
-		{ args: ["id"], body: true },
+		{ args: ["id"], body: true, ...gotchas("update") },
 	);
 	command(
 		[resource, "delete"],
@@ -787,6 +804,13 @@ command(
 	"/tags/entities/{entityType}/{entityId}",
 	"Replace tags on an entity.",
 	{ args: ["entityType", "entityId"], body: true },
+);
+command(
+	["email-templates", "clone"],
+	"POST",
+	"/email-templates/{id}/clone",
+	"Copy an email template's subject, HTML, and design into a new template.",
+	{ args: ["id"], gotchas: ['Optional --data \'{ "name": "New name" }\'. The copy defaults to "<name> (Copy)".'] },
 );
 command(
 	["segments", "evaluate"],

@@ -1,6 +1,6 @@
 ---
 name: repzo-workstation
-description: Inspect and operate Repzo Workstation through the bundled `repzo` CLI backed by the public REST API. Use for bulk updates, finding and merging duplicate accounts or contacts, CRM records, contacts, accounts, deals, activities, search, timelines, comments, attachments, notifications, approvals, products, pipelines, commerce, reports, appointments, projects, tickets, requests, tags, associations, forms, segments, campaigns, content, import/export jobs, Inbox, chat, voice, Send, event subscriptions, metadata, agent setup, or API troubleshooting.
+description: Inspect and operate Repzo Workstation through the bundled `repzo` CLI backed by the public REST API. Use for bulk updates, finding and merging duplicate accounts or contacts, CRM records, contacts, accounts, deals, activities, search, timelines, comments, attachments, notifications, approvals, products, pipelines, commerce, reports, appointments, projects, tickets, requests, tags, associations, forms, segments, campaigns, email templates (Unlayer designs or HTML), content, import/export jobs, Inbox, chat, voice, Send, event subscriptions, metadata, agent setup, or API troubleshooting.
 ---
 
 # Repzo Workstation
@@ -57,6 +57,7 @@ Read only the references needed for the task:
 - Chat messages, Markdown, Slack Block Kit blocks, buttons and interactive controls, threads, edits, ephemeral messages, modals, App Home, or idempotent sends: [references/chat-messages.md](references/chat-messages.md)
 - Inbox, notifications, voice, Send, or event subscriptions: [references/communications.md](references/communications.md)
 - Campaigns, forms, segments, collections, or articles: [references/marketing-content.md](references/marketing-content.md)
+- Email templates in Settings → Email templates, Unlayer designs, or HTML email bodies: [references/email-templates.md](references/email-templates.md)
 - Saved reports, report execution, imports, or exports: [references/reporting-data.md](references/reporting-data.md)
 - Authentication, pagination, errors, retries, scopes, and response envelopes: [references/api.md](references/api.md)
 

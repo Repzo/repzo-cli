@@ -1,6 +1,6 @@
 {
   "name": "repzo-cli",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "private": true,
   "description": "Official standalone CLI for Repzo Workstation and AI agents.",
   "type": "module",

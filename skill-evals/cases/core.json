@@ -690,5 +690,57 @@
 			"--yes"
 		],
 		"maxCommands": 3
+	},
+	{
+		"name": "cli-email-template-from-design",
+		"task": "Create an email template called Welcome with a heading, a short greeting to the contact by first name, and a Get started button linking to https://example.com/start.",
+		"context": "The Repzo CLI is available. The user authorizes creating the template.",
+		"tags": [
+			"cli",
+			"mutation",
+			"email-templates"
+		],
+		"mocks": [
+			{
+				"match": "email-templates create .*--yes",
+				"output": "{\"data\": {\"id\": \"tpl-1\", \"name\": \"Welcome\", \"subject\": \"\", \"bodyHtml\": \"<html>…</html>\", \"designJson\": {\"body\": {\"rows\": []}}}}"
+			}
+		],
+		"expectSequence": [
+			"^cli email-templates create .*designJson.*--dry-run",
+			"^cli email-templates create .*designJson.*--yes",
+			"^cli email-templates get tpl-1"
+		],
+		"reject": [
+			"email-templates delete",
+			"contact\\.first_name",
+			"\\{\\{first_name\\}\\}"
+		],
+		"maxCommands": 6
+	},
+	{
+		"name": "cli-email-template-html",
+		"task": "Save this HTML as an email template named Order shipped: <table role=\"presentation\"><tr><td>Your order is on its way.</td></tr></table>",
+		"context": "The Repzo CLI is available. The user authorizes creating the template and wants the HTML kept as written.",
+		"tags": [
+			"cli",
+			"mutation",
+			"email-templates"
+		],
+		"mocks": [
+			{
+				"match": "email-templates create .*--yes",
+				"output": "{\"data\": {\"id\": \"tpl-2\", \"name\": \"Order shipped\", \"subject\": \"\", \"bodyHtml\": \"<table role=\\\"presentation\\\"><tr><td>Your order is on its way.</td></tr></table>\", \"designJson\": {\"body\": {\"rows\": [{\"columns\": [{\"contents\": [{\"type\": \"html\"}]}]}]}}}}"
+			}
+		],
+		"expectSequence": [
+			"^cli email-templates create .*bodyHtml.*--dry-run",
+			"^cli email-templates create .*bodyHtml.*--yes"
+		],
+		"reject": [
+			"email-templates delete",
+			"email-templates create .*designJson"
+		],
+		"maxCommands": 5
 	}
 ]
