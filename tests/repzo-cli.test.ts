@@ -288,6 +288,45 @@ describe("Repzo CLI v2", () => {
 		});
 	});
 
+	it("discovers WhatsApp Flow commands and previews edits, syncs, and test sends", async () => {
+		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
+		for (const [command, method, path, args, mutation, requiresBody] of [
+			["whatsapp-channels list", "GET", "/inbox/whatsapp-channels", [], false, false],
+			["whatsapp-flows list", "GET", "/inbox/whatsapp-flows", [], false, false],
+			["whatsapp-flows get", "GET", "/inbox/whatsapp-flows/{id}", ["id"], false, false],
+			["whatsapp-flows create", "POST", "/inbox/whatsapp-flows", [], true, true],
+			["whatsapp-flows update", "PATCH", "/inbox/whatsapp-flows/{id}", ["id"], true, true],
+			["whatsapp-flows delete", "DELETE", "/inbox/whatsapp-flows/{id}", ["id"], true, false],
+			["whatsapp-flows duplicate", "POST", "/inbox/whatsapp-flows/{id}/duplicate", ["id"], true, false],
+			["whatsapp-flows sync", "POST", "/inbox/whatsapp-flows/{id}/sync", ["id"], true, false],
+			["whatsapp-flows send-test", "POST", "/inbox/whatsapp-flows/{id}/send-test", ["id"], true, true],
+			["whatsapp-flows flow-json", "GET", "/inbox/whatsapp-flows/{id}/flow-json", ["id"], false, false],
+			["whatsapp-flows starters", "GET", "/inbox/whatsapp-flows/starters", [], false, false],
+			["whatsapp-flows objects", "GET", "/inbox/whatsapp-flows/objects", [], false, false],
+			["whatsapp-flows properties", "GET", "/inbox/whatsapp-flows/objects/{entityType}/properties", ["entityType"], false, false],
+		] as const) {
+			expect(catalog).toContainEqual(expect.objectContaining({
+				command: `inbox ${command}`, method, path, arguments: args, mutation, requiresBody,
+			}));
+		}
+		const update = catalog.find((entry: { command: string }) => entry.command === "inbox whatsapp-flows update");
+		expect(update.gotchas.join(" ")).toContain("revision");
+
+		const body = { revision: 3, name: "Lead form" };
+		const preview = await runCli(["inbox", "whatsapp-flows", "update", "flow-1", "--data", JSON.stringify(body), "--dry-run"]);
+		expect(preview.code).toBe(0);
+		expect(JSON.parse(preview.stdout).data).toMatchObject({
+			dryRun: true, method: "PATCH", body, url: expect.stringContaining("/api/v1/inbox/whatsapp-flows/flow-1"),
+		});
+		const publish = await runCli(["inbox", "whatsapp-flows", "sync", "flow-1", "--data", '{"publish":true}', "--dry-run"]);
+		expect(publish.code).toBe(0);
+		expect(JSON.parse(publish.stdout).data).toMatchObject({
+			dryRun: true, method: "POST", body: { publish: true }, url: expect.stringContaining("/api/v1/inbox/whatsapp-flows/flow-1/sync"),
+		});
+		const send = await runCli(["inbox", "whatsapp-flows", "send-test", "flow-1"]);
+		expect(send.code).not.toBe(0);
+	});
+
 	it("discovers and previews Chat Block Kit, ephemeral, and view commands", async () => {
 		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
 		const expected = [
@@ -625,6 +664,75 @@ describe("Repzo CLI v2", () => {
 			refreshToken: "foxr-browser-refresh-secret",
 			scopes: ["contacts:read", "reports:read"],
 		});
+	});
+
+	it("signs a separate profile in for support and refuses to replace the default one", async () => {
+		const configDir = await mkdtemp(join(tmpdir(), "repzo-cli-support-"));
+		const env = {
+			...process.env,
+			REPZO_CONFIG_DIR: configDir,
+			REPZO_CREDENTIAL_BACKEND: "file",
+			REPZO_DISABLE_SKILL_REFRESH: "1",
+		};
+		const noProfile = await runCli(["auth", "login", "--support", "--no-browser"], { env });
+		expect(noProfile.code).toBe(1);
+		expect(JSON.parse(noProfile.stderr || noProfile.stdout).error.hint).toContain("--profile support-");
+
+		const app = express();
+		app.use(express.urlencoded({ extended: false }));
+		app.post("/api/v1/oauth/token", (_req, res) =>
+			res.json({
+				access_token: "foxu-support-access",
+				token_type: "Bearer",
+				expires_in: 3600,
+				refresh_token: "foxr-support-refresh",
+				scope: "contacts:read",
+			}),
+		);
+		const authServer = await new Promise<Server>((resolve) => {
+			const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+		});
+		const address = authServer.address();
+		if (!address || typeof address === "string")
+			throw new Error("Expected test address");
+		const origin = `http://127.0.0.1:${address.port}`;
+		let supportParam: string | null = null;
+
+		const result = await new Promise<{ code: number; stdout: string }>((resolve, reject) => {
+			const child = spawn(
+				process.execPath,
+				["bin/repzo.mjs", "auth", "login", "--support", "--profile", "support-acme", "--no-browser", "--base-url", origin],
+				{ cwd: process.cwd(), env, stdio: "pipe" },
+			);
+			let stdout = "";
+			let stderr = "";
+			let callbackSent = false;
+			child.stdout.on("data", (chunk) => {
+				stdout += chunk;
+			});
+			child.stderr.on("data", async (chunk) => {
+				stderr += chunk;
+				if (callbackSent) return;
+				const match = stderr.match(/Open this URL in your browser:\n(https?:\/\/[^\s]+)/);
+				if (!match) return;
+				callbackSent = true;
+				const authorizeUrl = new URL(match[1]);
+				supportParam = authorizeUrl.searchParams.get("support");
+				const callback = new URL(authorizeUrl.searchParams.get("redirect_uri")!);
+				callback.searchParams.set("code", "foxc-support-code");
+				callback.searchParams.set("state", authorizeUrl.searchParams.get("state")!);
+				await fetch(callback);
+			});
+			child.on("error", reject);
+			child.on("close", (code) => resolve({ code: code ?? 1, stdout }));
+		});
+		await new Promise<void>((resolve) => authServer.close(() => resolve()));
+
+		expect(result.code).toBe(0);
+		expect(supportParam).toBe("1");
+		expect(JSON.parse(result.stdout).data).toMatchObject({ profile: "support-acme", authType: "support" });
+		const status = await runCli(["auth", "status", "--profile", "support-acme"], { env });
+		expect(JSON.parse(status.stdout).data).toMatchObject({ profile: "support-acme", support: true });
 	});
 
 	it("normalizes an API-root base URL during browser OAuth", async () => {

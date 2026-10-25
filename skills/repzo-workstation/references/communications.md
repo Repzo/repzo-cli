@@ -33,6 +33,8 @@ repzo inbox conversations assign CONVERSATION_ID --data @assignment.json --dry-r
 repzo inbox conversations close CONVERSATION_ID --dry-run
 ```
 
+To build or edit WhatsApp Flows (in-chat forms) on a WhatsApp channel, read [whatsapp-flows.md](whatsapp-flows.md).
+
 ## Voice
 
 Listing calls, reading one call, channels, and analytics are reads. Placing a call is an external side effect and requires explicit authorization of the destination and purpose.
