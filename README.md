@@ -52,6 +52,13 @@ repzo agents test start AGENT_ID --data '{"sideEffects":"simulate"}' --dry-run
 
 The CLI defaults to `https://workstation.repzo.com`. Use `--base-url` or `REPZO_BASE_URL` for a different deployment. Mutations require either `--dry-run` or `--yes`. Credentials are accepted through browser login, stdin, or environment variables—never command-line arguments.
 
+Support agents can sign a separate profile in to a customer workspace that has turned on Support access. The browser asks which workspace and which member to act as; the login ends after 8 hours or as soon as the customer turns support access off:
+
+```bash
+repzo auth login --support --profile support-acme
+repzo contacts list --profile support-acme
+```
+
 Check whether an installer-managed binary has an update available:
 
 ```bash
@@ -116,3 +123,18 @@ repzo email-templates clone TEMPLATE_ID --data '{"name":"Welcome (copy)"}' --yes
 ```
 
 The server builds HTML only for text, heading, button, divider, image, and html blocks, and rejects other block types with 422. Pass the `meta.etag` from `get` as `--if-match` so an edit made in the editor meanwhile is not overwritten. See the [email templates skill reference](skills/repzo-workstation/references/email-templates.md) for a full design and an HTML example.
+
+## WhatsApp Flows
+
+Build and edit the in-chat WhatsApp forms (lead capture, surveys, booking, and ordering) on a WhatsApp channel. Start from a ready-made starter, save a draft, and sync it to Meta when it's ready:
+
+```bash
+repzo inbox whatsapp-channels list
+repzo inbox whatsapp-flows starters
+repzo inbox whatsapp-flows create --data @flow.json --dry-run
+repzo inbox whatsapp-flows update FLOW_ID --data '{"revision":3,"name":"Lead form"}' --yes
+repzo inbox whatsapp-flows sync FLOW_ID --yes
+repzo inbox whatsapp-flows send-test FLOW_ID --data '{"to":"+962790000000","body":"Try our form","cta":"Open form"}' --yes
+```
+
+Each Flow response lists `problems` that would stop the sync. Updates need the `revision` from your last read, and published Flows are locked, so duplicate one to change it. See the [WhatsApp Flows skill reference](skills/repzo-workstation/references/whatsapp-flows.md).

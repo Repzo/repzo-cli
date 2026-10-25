@@ -742,5 +742,69 @@
 			"email-templates create .*designJson"
 		],
 		"maxCommands": 5
+	},
+	{
+		"name": "cli-whatsapp-flow-from-starter",
+		"task": "Create a WhatsApp Flow on our WhatsApp channel that asks customers to rate their visit from 1 to 5 and leave a comment. Don't send it to Meta yet.",
+		"context": "The Repzo CLI is available. The user authorizes creating the draft Flow. There is one WhatsApp channel.",
+		"tags": [
+			"cli",
+			"mutation",
+			"whatsapp-flows"
+		],
+		"mocks": [
+			{
+				"match": "whatsapp-channels list",
+				"output": "{\"data\": [{\"id\": \"ch-1\", \"name\": \"Support WhatsApp\", \"inboxId\": \"in-1\", \"status\": \"active\", \"phoneNumber\": \"+962 7 9000 0000\", \"readyForFlows\": true}]}"
+			},
+			{
+				"match": "whatsapp-flows create .*--yes",
+				"output": "{\"data\": {\"id\": \"flow-1\", \"channelAccountId\": \"ch-1\", \"name\": \"Visit feedback\", \"category\": \"SURVEY\", \"status\": \"draft\", \"revision\": 0, \"syncedToMeta\": false, \"problems\": [], \"metaValidationErrors\": []}}"
+			}
+		],
+		"expectSequence": [
+			"^cli inbox whatsapp-channels list",
+			"^cli inbox whatsapp-flows starters",
+			"^cli inbox whatsapp-flows create .*ch-1.*--dry-run",
+			"^cli inbox whatsapp-flows create .*ch-1.*--yes"
+		],
+		"reject": [
+			"whatsapp-flows sync",
+			"whatsapp-flows send-test",
+			"publish"
+		],
+		"maxCommands": 7
+	},
+	{
+		"name": "cli-whatsapp-flow-edit-published",
+		"task": "Change the button on the first screen of the published Lead form WhatsApp Flow (flow-9) to say Next.",
+		"context": "The Repzo CLI is available. The user authorizes the edit but has not asked to publish anything.",
+		"tags": [
+			"cli",
+			"mutation",
+			"whatsapp-flows"
+		],
+		"mocks": [
+			{
+				"match": "whatsapp-flows get flow-9",
+				"output": "{\"data\": {\"id\": \"flow-9\", \"channelAccountId\": \"ch-1\", \"name\": \"Lead form\", \"category\": \"LEAD_GENERATION\", \"status\": \"published\", \"revision\": 4, \"syncedToMeta\": true, \"problems\": [], \"definition\": {\"kind\": \"form\", \"entryScreen\": \"WELCOME\", \"bookingLinkId\": null, \"screens\": [{\"id\": \"WELCOME\", \"title\": \"Welcome\", \"description\": \"\", \"buttonLabel\": \"Continue\", \"position\": {\"x\": 0, \"y\": 0}, \"fields\": [{\"id\": \"name\", \"type\": \"TextInput\", \"inputType\": \"text\", \"label\": \"Your name\", \"required\": true, \"options\": []}]}], \"edges\": []}}}"
+			},
+			{
+				"match": "whatsapp-flows duplicate flow-9 .*--yes",
+				"output": "{\"data\": {\"id\": \"flow-10\", \"name\": \"Lead form (copy)\", \"status\": \"draft\", \"revision\": 0, \"syncedToMeta\": false, \"problems\": [], \"definition\": {\"kind\": \"form\", \"entryScreen\": \"WELCOME\", \"bookingLinkId\": null, \"screens\": [{\"id\": \"WELCOME\", \"title\": \"Welcome\", \"description\": \"\", \"buttonLabel\": \"Continue\", \"position\": {\"x\": 0, \"y\": 0}, \"fields\": [{\"id\": \"name\", \"type\": \"TextInput\", \"inputType\": \"text\", \"label\": \"Your name\", \"required\": true, \"options\": []}]}], \"edges\": []}}}"
+			}
+		],
+		"expectSequence": [
+			"^cli inbox whatsapp-flows get flow-9",
+			"^cli inbox whatsapp-flows duplicate flow-9",
+			"^cli inbox whatsapp-flows update flow-10 .*revision.*Next.*--dry-run",
+			"^cli inbox whatsapp-flows update flow-10 .*revision.*Next.*--yes"
+		],
+		"reject": [
+			"whatsapp-flows update flow-9",
+			"publish",
+			"whatsapp-flows delete"
+		],
+		"maxCommands": 8
 	}
 ]

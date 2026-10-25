@@ -79,6 +79,11 @@ const GLOBAL_FLAGS = Object.freeze([
 		description: "Print the login URL instead of opening it.",
 	},
 	{
+		name: "--support",
+		type: "boolean",
+		description: "Support agents: sign a separate profile in to a customer workspace that allows support access.",
+	},
+	{
 		name: "--query",
 		type: "key=value",
 		repeatable: true,
@@ -523,6 +528,127 @@ command(
 	{ args: ["id"], pagination: "cursor" },
 );
 
+const WHATSAPP_FLOW_DEFINITION_GOTCHAS = [
+	"definition is the builder's JSON: { kind, entryScreen, screens, edges, bookingLinkId, ... }. Copy a definition from `inbox whatsapp-flows starters` instead of writing one from scratch.",
+	"Unknown keys anywhere in definition fail with 422 and details.unknownKeys. Check the response's problems: it must be empty before sync.",
+];
+command(
+	["inbox", "whatsapp-channels", "list"],
+	"GET",
+	"/inbox/whatsapp-channels",
+	"List WhatsApp channels that Flows can belong to.",
+	{ pagination: "offset", gotchas: ["Use a channel id as channelAccountId. readyForFlows false means the channel must be reconnected in Inbox before Flows can sync or send."] },
+);
+command(
+	["inbox", "whatsapp-flows", "list"],
+	"GET",
+	"/inbox/whatsapp-flows",
+	"List WhatsApp Flows.",
+	{ pagination: "offset", gotchas: ["Filter with --query channelAccountId=ID or --query status=draft|published. Items are summaries; get a Flow for its definition and problems."] },
+);
+command(
+	["inbox", "whatsapp-flows", "get"],
+	"GET",
+	"/inbox/whatsapp-flows/{id}",
+	"Get a WhatsApp Flow with its definition and problems.",
+	{ args: ["id"] },
+);
+command(
+	["inbox", "whatsapp-flows", "create"],
+	"POST",
+	"/inbox/whatsapp-flows",
+	"Create a draft WhatsApp Flow. Nothing is sent to Meta until sync.",
+	{
+		body: true,
+		gotchas: [
+			"Body: { channelAccountId, name, category, definition }. category is LEAD_GENERATION, APPOINTMENT_BOOKING, CUSTOMER_SUPPORT, SURVEY, SIGN_UP, or OTHER.",
+			...WHATSAPP_FLOW_DEFINITION_GOTCHAS,
+		],
+	},
+);
+command(
+	["inbox", "whatsapp-flows", "update"],
+	"PATCH",
+	"/inbox/whatsapp-flows/{id}",
+	"Update a draft WhatsApp Flow.",
+	{
+		args: ["id"],
+		body: true,
+		gotchas: [
+			"Body: { revision, name?, category?, definition? }. revision is required: send the value from your last get; 409 means someone saved in between, so get and apply the change again.",
+			"definition replaces the whole definition. Published Flows return 409: duplicate them and edit the copy. The kind (form, appointment, order) can't change.",
+			...WHATSAPP_FLOW_DEFINITION_GOTCHAS,
+		],
+	},
+);
+command(
+	["inbox", "whatsapp-flows", "delete"],
+	"DELETE",
+	"/inbox/whatsapp-flows/{id}",
+	"Delete a WhatsApp Flow here and at Meta.",
+	{ args: ["id"], gotchas: ["Deletes the Meta draft, or deprecates a published Flow so customers can no longer open it. This can't be undone."] },
+);
+command(
+	["inbox", "whatsapp-flows", "duplicate"],
+	"POST",
+	"/inbox/whatsapp-flows/{id}/duplicate",
+	"Copy a WhatsApp Flow into a new editable draft.",
+	{ args: ["id"], gotchas: ['The copy is named "<name> (copy)". Use it to change a published Flow.'] },
+);
+command(
+	["inbox", "whatsapp-flows", "sync"],
+	"POST",
+	"/inbox/whatsapp-flows/{id}/sync",
+	"Upload a WhatsApp Flow to Meta, optionally publishing it.",
+	{
+		args: ["id"],
+		gotchas: [
+			"Sends the Flow to Meta. Optional --data '{ \"publish\": true }' also publishes a clean upload, which locks the Flow for good.",
+			"Read flow.metaValidationErrors and previewUrl in the response. Publish only when the user asked for it.",
+		],
+	},
+);
+command(
+	["inbox", "whatsapp-flows", "send-test"],
+	"POST",
+	"/inbox/whatsapp-flows/{id}/send-test",
+	"Send a WhatsApp Flow to a phone number as a test.",
+	{
+		args: ["id"],
+		body: true,
+		gotchas: [
+			"Body: { to, body, cta }. to is a phone number with country code; cta is the button label (max 20 characters, no emoji).",
+			"Sends a real WhatsApp message. Sync the Flow first; only send to a number the user gave you.",
+		],
+	},
+);
+command(
+	["inbox", "whatsapp-flows", "flow-json"],
+	"GET",
+	"/inbox/whatsapp-flows/{id}/flow-json",
+	"Show the Flow JSON that Workstation uploads to Meta.",
+	{ args: ["id"], gotchas: ["Returns 422 with details.problems while the Flow has problems."] },
+);
+command(
+	["inbox", "whatsapp-flows", "starters"],
+	"GET",
+	"/inbox/whatsapp-flows/starters",
+	"List ready-made Flow definitions to start from.",
+);
+command(
+	["inbox", "whatsapp-flows", "objects"],
+	"GET",
+	"/inbox/whatsapp-flows/objects",
+	"List objects whose properties or records a Flow can use.",
+);
+command(
+	["inbox", "whatsapp-flows", "properties"],
+	"GET",
+	"/inbox/whatsapp-flows/objects/{entityType}/properties",
+	"List properties a Flow field can save answers to.",
+	{ args: ["entityType"], gotchas: ["Each property has a ready field with propertyBinding. Copy it into a screen and give it your own id; keep its type, inputType, and options."] },
+);
+
 command(
 	["chat", "users", "list"],
 	"GET",
@@ -919,6 +1045,7 @@ Usage:
   repzo commands --json
   repzo auth login [--profile NAME]
   repzo auth login --token-stdin [--profile NAME]
+  repzo auth login --support --profile support-NAME
   repzo setup agents|codex|claude [--force]
   repzo doctor | completion <bash|zsh|fish> | upgrade [--yes]
 
@@ -938,7 +1065,8 @@ Common options:
   --compact               Print compact JSON
   --agent --help          Return machine-readable help
 
-REPZO_TOKEN and REPZO_BASE_URL override the selected profile. Browser login is the default; use --token-stdin for a Developer App key or CI. Tokens are never accepted as argv values.`;
+REPZO_TOKEN and REPZO_BASE_URL override the selected profile. Browser login is the default; use --token-stdin for a Developer App key or CI. Tokens are never accepted as argv values.
+Support agents: --support signs a separate profile in to a customer workspace that allows support access, acting as a member you pick in the browser. It ends after 8 hours or when the customer turns support access off.`;
 
 function writeJson(stream, value, compact = OUTPUT_OPTIONS.compact) {
 	stream.write(`${JSON.stringify(value, null, compact ? 0 : 2)}\n`);
@@ -1204,6 +1332,7 @@ function parseArgs(argv) {
 		"token-stdin",
 		"no-retry",
 		"no-browser",
+		"support",
 		"version",
 	]);
 	const values = new Set([
@@ -1584,6 +1713,7 @@ async function browserLogin(origin, options = {}) {
 		"device_name",
 		`${hostname()} (${process.platform})`,
 	);
+	if (options.support) authorize.searchParams.set("support", "1");
 	process.stderr.write(
 		`Opening ${authorize.origin} to authorize Repzo CLI...\n`,
 	);
@@ -1638,6 +1768,12 @@ async function handleAuth(positionals, options) {
 		let storedCredential;
 		let authType;
 		let scopes;
+		if (options.support && (options["token-stdin"] || !options.profile))
+			fail("Support login needs its own profile and browser login.", {
+				code: "usage",
+				exitCode: EXIT_CODES.usage,
+				hint: "Run repzo auth login --support --profile support-<customer>, so it never replaces your own login.",
+			});
 		if (options["token-stdin"]) {
 			const token = (await readStdin()).trim();
 			if (!token.startsWith("foxa-"))
@@ -1651,9 +1787,10 @@ async function handleAuth(positionals, options) {
 		} else {
 			const payload = await browserLogin(baseUrl, {
 				open: !options["no-browser"],
+				support: Boolean(options.support),
 			});
 			storedCredential = serializeOAuthCredential(payload);
-			authType = "browser";
+			authType = options.support ? "support" : "browser";
 			scopes = String(payload.scope || "")
 				.split(/\s+/)
 				.filter(Boolean);
@@ -1673,6 +1810,9 @@ async function handleAuth(positionals, options) {
 			authType,
 			credentialStore: backend,
 			...(scopes ? { scopes } : {}),
+			...(authType === "support"
+				? { note: "Acting as the member you picked. This login ends after 8 hours or when the customer turns support access off." }
+				: {}),
 		});
 		return;
 	}
@@ -1707,6 +1847,9 @@ async function handleAuth(positionals, options) {
 			authType: process.env.REPZO_TOKEN
 				? "environment"
 				: credential?.type || null,
+			...(!process.env.REPZO_TOKEN && config.profiles[profile]?.authType === "support"
+				? { support: true }
+				: {}),
 			...(credential?.type === "oauth"
 				? {
 						expiresAt: Number.isFinite(Number(credential.expiresAt))

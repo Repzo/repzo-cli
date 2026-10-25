@@ -23,6 +23,22 @@ repzo auth status --profile work
 repzo doctor
 ```
 
+### Support login
+
+Platform support agents can sign the CLI in to a customer's workspace when that workspace has turned on Support access:
+
+```bash
+repzo auth login --support --profile support-acme
+repzo contacts list --profile support-acme --limit 20
+repzo auth logout --profile support-acme
+```
+
+- The browser asks the agent to pick the customer workspace and the member to act as. Every command runs as that member, with their role and record visibility, and the customer's activity log marks each change as made by support.
+- It always uses its own profile (`--profile` is required), so it never replaces the agent's own login. Pass that `--profile` on every command and never mix it with the agent's own profile in one task.
+- It cannot post in team chat or place calls as the member.
+- It ends after 8 hours, or immediately when the customer turns support access off, the agent leaves the support roster, or the member loses access. A request then fails with "This support login has ended": stop and tell the user. Don't try to get back in another way.
+- Use it only for the support request the user is working on. Log out when done.
+
 For retry-safe writes, generate one non-secret operation key and keep it stable across retries of the identical request:
 
 ```bash
