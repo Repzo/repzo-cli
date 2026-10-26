@@ -24,35 +24,35 @@ repzo agents tools AGENT_ID --all --json
 | Function | What it does | Helper read tools | Channels |
 |---|---|---|---|
 | `send_whatsapp_flow` | Sends a published WhatsApp Flow (in-chat form, booking, order) | `list_whatsapp_flows` | chat only (WhatsApp) |
-| `upsert_contact` | Creates or updates the customer's contact details | — | see `channels` |
-| `update_conversation_profile` | Saves customer details on the conversation | — | see `channels` |
-| `add_contact_note` | Adds a note to the customer's contact | — | see `channels` |
-| `send_inbox_macro` | Sends a saved reply (macro) | `list_inbox_macros` | see `channels` |
-| `send_whatsapp_template` | Sends an approved WhatsApp template | — | see `channels` |
-| `create_activity` | Creates a task, call, or other activity | `search_activities` | see `channels` |
-| `update_activity` | Updates an activity | `search_activities` | see `channels` |
-| `manage_reminders` | Adds or changes reminders | `search_activities` | see `channels` |
-| `create_appointment` | Books an appointment | `search_appointments`, `get_availability_slots` | see `channels` |
-| `update_appointment` | Reschedules or changes an appointment | `search_appointments`, `get_availability_slots` | see `channels` |
-| `delete_appointment` | Cancels an appointment | `search_appointments`, `get_availability_slots` | see `channels` |
-| `add_to_cart` | Adds products to the customer's cart | `search_products`, `search_carts`, `search_orders` | see `channels` |
-| `create_order` | Places an order | `search_products`, `search_carts`, `search_orders` | see `channels` |
-| `update_order` | Changes an order | `search_products`, `search_carts`, `search_orders` | see `channels` |
-| `create_ticket` | Opens a support ticket | `search_tickets`, `get_sla_status` | see `channels` |
-| `update_ticket` | Updates a ticket | `search_tickets`, `get_sla_status` | see `channels` |
-| `manage_tags` | Adds or removes tags | `search_tags` | see `channels` |
-| `create_account` | Creates a company account | `search_contacts`, `search_accounts`, `search_deals` | see `channels` |
-| `create_deal` | Creates a deal | `search_contacts`, `search_accounts`, `search_deals` | see `channels` |
-| `create_price_offer` | Creates a quote (price offer) | `search_products`, `search_price_offers` | see `channels` |
-| `create_invoice` | Creates an invoice | `search_products`, `search_invoices` | see `channels` |
-| `create_request` | Submits a request | `search_requests`, `search_request_types` | see `channels` |
-| `update_request` | Updates a request | `search_requests`, `search_request_types` | see `channels` |
-| `send_email` | Sends an email | `search_contacts` | see `channels` |
-| `create_project` | Creates a project | `search_projects` | see `channels` |
+| `upsert_contact` | Creates or updates the customer's contact details | — | chat, calling |
+| `update_conversation_profile` | Saves customer details on the conversation | — | chat, calling |
+| `add_contact_note` | Adds a note to the customer's contact | — | chat, calling |
+| `send_inbox_macro` | Sends a saved reply (macro) | `list_inbox_macros` | chat only |
+| `send_whatsapp_template` | Sends an approved WhatsApp template | — | chat only |
+| `create_activity` | Creates a task, call, or other activity | `search_activities` | chat, calling |
+| `update_activity` | Updates an activity | `search_activities` | chat, calling |
+| `manage_reminders` | Adds or changes reminders | `search_activities` | chat, calling |
+| `create_appointment` | Books an appointment | `search_appointments`, `get_availability_slots` | chat, calling |
+| `update_appointment` | Reschedules or changes an appointment | `search_appointments`, `get_availability_slots` | chat, calling |
+| `delete_appointment` | Cancels an appointment | `search_appointments`, `get_availability_slots` | chat only |
+| `add_to_cart` | Adds products to the customer's cart | `search_products`, `search_carts`, `search_orders` | chat, calling |
+| `create_order` | Places an order | `search_products`, `search_carts`, `search_orders` | chat, calling |
+| `update_order` | Changes an order | `search_products`, `search_carts`, `search_orders` | chat, calling |
+| `create_ticket` | Opens a support ticket | `search_tickets`, `get_sla_status` | chat, calling |
+| `update_ticket` | Updates a ticket | `search_tickets`, `get_sla_status` | chat, calling |
+| `manage_tags` | Adds or removes tags | `search_tags` | chat, calling |
+| `create_account` | Creates a company account | `search_contacts`, `search_accounts`, `search_deals` | chat, calling |
+| `create_deal` | Creates a deal | `search_contacts`, `search_accounts`, `search_deals` | chat, calling |
+| `create_price_offer` | Creates a quote (price offer) | `search_products`, `search_price_offers` | chat, calling |
+| `create_invoice` | Creates an invoice | `search_products`, `search_invoices` | chat, calling |
+| `create_request` | Submits a request | `search_requests`, `search_request_types` | chat, calling |
+| `update_request` | Updates a request | `search_requests`, `search_request_types` | chat, calling |
+| `send_email` | Sends an email | `search_contacts` | chat only |
+| `create_project` | Creates a project | `search_projects` | chat, calling |
 
 `check_my_loyalty` is a read capability (the customer's own loyalty balance), not an action. Like other helpers it cannot be enabled on its own; read `helpers` in the Function list to see which Function brings it.
 
-Each item's `channels` field (`chat`, `calling`) says where the Function works. A Function that is not available on a channel is simply not offered there. `send_whatsapp_flow` is chat-only and only works on WhatsApp conversations.
+Each item's `channels` field (`chat`, `calling`) says where the Function works; the table shows today's values. Phone-call agents never get sending or destructive Functions (saved replies, WhatsApp templates and Flows, email, cancelling appointments), so those are chat only. `send_whatsapp_flow` also only works on WhatsApp conversations.
 
 ## Read one Function
 
