@@ -1,0 +1,104 @@
+# Agent Functions and tools
+
+Functions are the CRM actions an agent is allowed to take: create an order, book an appointment, open a ticket, send a WhatsApp Flow, and so on. Each Function is off until someone enables it on that agent, and each one can carry instructions and field bindings that shape how the agent fills it in.
+
+This page is orientation only. The server is authoritative and may already have newer Functions, different labels, or different helpers. Always read the live catalog first:
+
+```bash
+repzo agents functions list AGENT_ID --all --json
+repzo agents tools AGENT_ID --all --json
+```
+
+## Functions, tools, and helpers
+
+- A **Function** is a configurable action (`create_order`). Enabling it makes its tool name usable by the agent.
+- Each Function has **helpers**: read-only tools that are enabled together with it (`create_order` brings `search_products`, `search_carts`, `search_orders`). The agent uses helpers to look things up before it acts.
+- Helper tools cannot be switched on by themselves. A helper becomes allowed only when a Function that lists it in `helpers` is enabled. To get `search_products`, enable a Function such as `add_to_cart`, `create_order`, `create_price_offer`, or `create_invoice`.
+- **Core** tools are always on: `search_articles`, `read_article_file`, `read_article_file_visual`, `send_inbox_message`.
+- **External** tools come from connected apps and are named with an `mcp_` prefix. They are managed by the connection in the web app, not through Functions.
+
+`repzo agents tools AGENT_ID --json` lists every tool name with `kind` (`core`, `function`, `helper`, `external`), `readOnly`, `allowed`, the owning `function`, and `connectorName`. Only names with `allowed: true` may appear in a Playbook `[[tool name="…"]]` step or a procedure tool step. Never guess a tool name.
+
+## Catalog (orientation)
+
+| Function | What it does | Helper read tools | Channels |
+|---|---|---|---|
+| `send_whatsapp_flow` | Sends a published WhatsApp Flow (in-chat form, booking, order) | `list_whatsapp_flows` | chat only (WhatsApp) |
+| `upsert_contact` | Creates or updates the customer's contact details | — | see `channels` |
+| `update_conversation_profile` | Saves customer details on the conversation | — | see `channels` |
+| `add_contact_note` | Adds a note to the customer's contact | — | see `channels` |
+| `send_inbox_macro` | Sends a saved reply (macro) | `list_inbox_macros` | see `channels` |
+| `send_whatsapp_template` | Sends an approved WhatsApp template | — | see `channels` |
+| `create_activity` | Creates a task, call, or other activity | `search_activities` | see `channels` |
+| `update_activity` | Updates an activity | `search_activities` | see `channels` |
+| `manage_reminders` | Adds or changes reminders | `search_activities` | see `channels` |
+| `create_appointment` | Books an appointment | `search_appointments`, `get_availability_slots` | see `channels` |
+| `update_appointment` | Reschedules or changes an appointment | `search_appointments`, `get_availability_slots` | see `channels` |
+| `delete_appointment` | Cancels an appointment | `search_appointments`, `get_availability_slots` | see `channels` |
+| `add_to_cart` | Adds products to the customer's cart | `search_products`, `search_carts`, `search_orders` | see `channels` |
+| `create_order` | Places an order | `search_products`, `search_carts`, `search_orders` | see `channels` |
+| `update_order` | Changes an order | `search_products`, `search_carts`, `search_orders` | see `channels` |
+| `create_ticket` | Opens a support ticket | `search_tickets`, `get_sla_status` | see `channels` |
+| `update_ticket` | Updates a ticket | `search_tickets`, `get_sla_status` | see `channels` |
+| `manage_tags` | Adds or removes tags | `search_tags` | see `channels` |
+| `create_account` | Creates a company account | `search_contacts`, `search_accounts`, `search_deals` | see `channels` |
+| `create_deal` | Creates a deal | `search_contacts`, `search_accounts`, `search_deals` | see `channels` |
+| `create_price_offer` | Creates a quote (price offer) | `search_products`, `search_price_offers` | see `channels` |
+| `create_invoice` | Creates an invoice | `search_products`, `search_invoices` | see `channels` |
+| `create_request` | Submits a request | `search_requests`, `search_request_types` | see `channels` |
+| `update_request` | Updates a request | `search_requests`, `search_request_types` | see `channels` |
+| `send_email` | Sends an email | `search_contacts` | see `channels` |
+| `create_project` | Creates a project | `search_projects` | see `channels` |
+
+`check_my_loyalty` is a read capability (the customer's own loyalty balance), not an action. Like other helpers it cannot be enabled on its own; read `helpers` in the Function list to see which Function brings it.
+
+Each item's `channels` field (`chat`, `calling`) says where the Function works. A Function that is not available on a channel is simply not offered there. `send_whatsapp_flow` is chat-only and only works on WhatsApp conversations.
+
+## Read one Function
+
+```bash
+repzo agents functions get AGENT_ID create_appointment --json
+```
+
+The response adds `fields`: the Function's inputs, each with `key`, `label`, `description`, `type`, `required`, `options` (allowed values), and `referenceEntity`. These keys are what `config.bindings` accepts. `usedIn` lists the Playbook flows and procedures that depend on the Function.
+
+## Configure a Function
+
+The update body is `{ "enabled": true|false, "config": { "instructions", "bindings", "whatsappFlows" } }`. `config` is optional.
+
+- `instructions` (up to 2,000 characters): when the agent should use this Function and how. Example: "Only book after the customer has picked a slot from get_availability_slots. Confirm the date and time back to them first."
+- `bindings`: per input field key, where the value comes from:
+  - `{ "source": "agent" }` — the AI fills it in from the conversation. Add `"instructions"` to guide it ("Use the branch the customer named; ask if unclear").
+  - `{ "source": "fixed", "value": … }` — always this value. Use for things like a fixed pipeline, owner, or status. Copy real IDs from metadata; never guess.
+  - `{ "source": "variable", "variable": "contact.phone" }` — taken from a Playbook variable path.
+- `whatsappFlows` (only for `send_whatsapp_flow`, required there): 1–20 published Flows as `[{ "flowId": "…", "instructions": "When to send this Flow" }]`. Get IDs from `repzo agents whatsapp-flows AGENT_ID --json` and use only those with `available: true`.
+
+Example file `function-update.json`:
+
+```json
+{
+  "enabled": true,
+  "config": {
+    "instructions": "Book only after the customer confirms a slot from get_availability_slots.",
+    "bindings": {
+      "serviceId": { "source": "agent", "instructions": "Match the service the customer asked for." },
+      "statusId": { "source": "fixed", "value": "STATUS_ID" },
+      "phone": { "source": "variable", "variable": "contact.phone" }
+    }
+  }
+}
+```
+
+```bash
+repzo agents functions update AGENT_ID create_appointment --data @function-update.json --dry-run
+repzo agents functions update AGENT_ID create_appointment --data @function-update.json --yes
+repzo agents functions get AGENT_ID create_appointment --json
+```
+
+Rules:
+
+- Enable a Function before a Playbook flow or procedure uses its tool. Then re-read `repzo agents tools AGENT_ID --json` and confirm `allowed: true`.
+- Disabling a Function that a Playbook flow or procedure still uses returns `409`. Check `usedIn`, edit the Playbook (or the manual procedure) first, then disable.
+- A `422` names the invalid field: an unknown binding key, a value outside `options`, an unpublished Flow, or instructions that are too long.
+- Function changes are draft changes. Test the draft, then publish with explicit approval.
+- Function writes run simulated during `repzo agents test` conversations; they never change real records there.
