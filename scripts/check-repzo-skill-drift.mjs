@@ -23,7 +23,7 @@ const requiredReferences = {
 	"sales-commerce.md",
 	"service-operations.md",
 	],
-	"repzo-ai-agents": ["api.md", "playbook.md", "workflows.md"],
+	"repzo-ai-agents": ["api.md", "functions.md", "playbook.md", "workflows.md"],
 };
 
 async function markdownFiles() {

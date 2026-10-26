@@ -982,15 +982,199 @@ for (const action of ["publish", "unpublish", "archive"])
 		`${action[0].toUpperCase()}${action.slice(1)} an article.`,
 		{ args: ["id"] },
 	);
+const AGENT_ETAG_GOTCHA = "Read the agent first and pass its meta.etag as --if-match; a 412 means it changed meanwhile: re-read, rebase, preview again.";
+const AGENT_PLAYBOOK_TOOL_GOTCHA = "Playbook [[tool]] steps and procedure tool steps may only name tools that agents tools lists with allowed: true.";
 command(["agents", "list"], "GET", "/agents", "List AI agents.", { pagination: "offset" });
-command(["agents", "get"], "GET", "/agents/{id}", "Get a curated AI agent configuration.", { args: ["id"] });
-command(["agents", "update"], "PATCH", "/agents/{id}", "Update an AI agent draft or playbook.", { args: ["id"], body: true });
+command(["agents", "templates"], "GET", "/agents/templates", "List the starter templates agents create can start from.", {
+	gotchas: ["Keys: service, support, sales, appointment, commerce, order_status, reactivation, reminder. Each lists the functions it enables and the setup steps it still needs."],
+});
+command(["agents", "get"], "GET", "/agents/{id}", "Get a curated AI agent configuration.", {
+	args: ["id"],
+	gotchas: ["Returns meta.etag; send it as --if-match on agents update. Includes channelMode, handoffSettings, and chatSettings (null for calling-only agents)."],
+});
+command(["agents", "create"], "POST", "/agents", "Create a draft chat AI agent, optionally from a template.", {
+	body: true,
+	gotchas: [
+		"Body: { name (required, ≤255), description?, templateKey?, playbook?, role?, tone?, languageBehavior?, fallbackBehavior?, visibilityScope?: org|department|private, handoffSettings? }.",
+		"Always creates a chat agent in draft status. Calling (voice) agents still need the web app to pick a model and voice.",
+		"Read agents templates for templateKey values.",
+	],
+});
+command(["agents", "update"], "PATCH", "/agents/{id}", "Update an AI agent draft, settings, or Playbook.", {
+	args: ["id"],
+	body: true,
+	gotchas: [
+		AGENT_ETAG_GOTCHA,
+		"Updatable: name, description, playbook, role, tone, languageBehavior, fallbackBehavior, visibilityScope, status (incl. archived), handoffSettings (object, or null for defaults), chatSettings ({ endChatEnabled?, autoCloseMinutes? }, merged).",
+		"handoffSettings: { conditions: ≤10 strings ≤300 chars, messageMode: ai|fixed (fixed needs messageText), routeTo: inbox|user|department, routeUserId, routeDepartmentId, afterHandoff: stop|keep_helping, summaryNote }.",
+		"Run agents playbook validate with the new Playbook first; flows compile on save and an invalid Playbook returns 422 without saving.",
+		AGENT_PLAYBOOK_TOOL_GOTCHA,
+	],
+});
+command(["agents", "delete"], "DELETE", "/agents/{id}", "Soft-delete an AI agent.", {
+	args: ["id"],
+	gotchas: ["Needs ai_agents.delete. System agents return 403. Prefer status archived via agents update when the user only wants it out of the way."],
+});
+command(["agents", "functions", "list"], "GET", "/agents/{id}/functions", "List the agent's configurable Functions (CRM actions) and whether each is enabled.", {
+	args: ["id"],
+	pagination: "offset",
+	gotchas: [
+		"This is the authoritative Function catalog; newer servers may add functions. Default limit is 50.",
+		"Each item has enabled, channels (chat/calling), helpers (read tools enabled with it), config, and usedIn (Playbook flows and procedures that depend on it).",
+	],
+});
+command(["agents", "functions", "get"], "GET", "/agents/{id}/functions/{name}", "Get one Function with its bindable input fields.", {
+	args: ["id", "name"],
+	gotchas: ["fields[] lists the bindable input keys (with type, required, options, referenceEntity) to use in config.bindings."],
+});
+command(["agents", "functions", "update"], "PATCH", "/agents/{id}/functions/{name}", "Enable, disable, or configure one agent Function.", {
+	args: ["id", "name"],
+	body: true,
+	gotchas: [
+		"Body: { enabled: boolean, config?: { instructions? (≤2000 chars), bindings?, whatsappFlows? } }.",
+		"bindings: { FIELD_KEY: { source: \"agent\", instructions? } | { source: \"fixed\", value } | { source: \"variable\", variable } }. Get field keys from agents functions get.",
+		"send_whatsapp_flow needs config.whatsappFlows: [{ flowId, instructions? }] with 1–20 published Flows from agents whatsapp-flows; it is chat (WhatsApp) only.",
+		"Disabling a function still used by a Playbook flow or procedure returns 409: edit the Playbook or procedure first (see usedIn).",
+		"Changes the draft; publish to make it live.",
+	],
+});
+command(["agents", "tools"], "GET", "/agents/{id}/tools", "List every tool name the agent can use in Playbook [[tool]] steps and procedures.", {
+	args: ["id"],
+	pagination: "offset",
+	gotchas: [
+		"Use only names with allowed: true. A function's tool becomes allowed after agents functions update enables it.",
+		"kind: core (always on), function, helper, external (connector tools, named mcp_*). Default limit is 100.",
+		"Helper tools (e.g. search_products, check_my_loyalty) cannot be enabled on their own; they become allowed when a function listing them in helpers is enabled.",
+	],
+});
+command(["agents", "whatsapp-flows"], "GET", "/agents/{id}/whatsapp-flows", "List published WhatsApp Flows the agent's send_whatsapp_flow function can send.", {
+	args: ["id"],
+	pagination: "offset",
+	gotchas: ["Use the returned id as flowId in send_whatsapp_flow config.whatsappFlows. Only Flows with available: true can be sent."],
+});
+command(["agents", "playbook", "validate"], "POST", "/agents/{id}/playbook/validate", "Compile and check a Playbook without saving it.", {
+	args: ["id"],
+	body: true,
+	mutation: false,
+	gotchas: [
+		"Body: { playbook: string }. Returns valid, characterCount/characterLimit, errors, warnings, and the compiled flows and steps.",
+		"Run before every Playbook save; fix every error and review warnings first. A warning like \"Saving also allows the agent to use X\" (older agents whose tools are not managed through Functions yet) means the save will enable that tool: tell the user before saving.",
+	],
+});
+command(["agents", "versions", "list"], "GET", "/agents/{id}/versions", "List saved behavior versions; published marks the live one.", { args: ["id"], pagination: "offset" });
+command(["agents", "versions", "get"], "GET", "/agents/{id}/versions/{versionId}", "Get one version with its full behavior snapshot.", {
+	args: ["id", "versionId"],
+	gotchas: ["snapshot has playbook, role, tone, languageBehavior, fallbackBehavior, handoffSettings, functions, guidance, procedures, and knowledgeSources. Compare it with agents get before a restore."],
+});
+command(["agents", "versions", "restore"], "POST", "/agents/{id}/versions/{versionId}/restore", "Copy a saved version into the draft (a backup version is saved first).", {
+	args: ["id", "versionId"],
+	gotchas: [
+		"Needs both ai_agents.update and ai_agents.manage_knowledge. Restore only with explicit user approval.",
+		"Only changes the draft: live runs keep the published version until agents publish. Returns backupVersionId to roll back the restore and warnings to review.",
+	],
+});
+command(["agents", "publish"], "POST", "/agents/{id}/publish", "Publish the reviewed AI agent draft.", {
+	args: ["id"],
+	gotchas: ["Live channels switch to this snapshot immediately. Test the draft first and publish only with explicit approval."],
+});
+command(["agents", "unpublish"], "DELETE", "/agents/{id}/publish", "Clear the published version so live runs use the current draft (instant mode).", {
+	args: ["id"],
+	gotchas: [
+		"Live runs start using the current, possibly untested draft immediately and every later draft save goes live at once. Only with explicit user approval.",
+		"Needs ai_agents.deploy. To roll back behavior instead, restore a version and publish it.",
+	],
+});
+command(["agents", "runs", "list"], "GET", "/agents/{id}/runs", "List recent agent runs with status, cost, and errors.", { args: ["id"], pagination: "offset" });
+command(["agents", "runs", "get"], "GET", "/agents/{id}/runs/{runId}", "Get one run's reply, tool calls, knowledge used, procedure runs, and trace.", {
+	args: ["id", "runId"],
+	gotchas: ["transcript is present only when you can see that Inbox conversation; inputPreview/outputPreview appear only on tool trace steps."],
+});
+command(["agents", "unresolved", "list"], "GET", "/agents/{id}/unresolved-questions", "List grouped questions the agent could not answer.", {
+	args: ["id"],
+	pagination: "offset",
+	gotchas: [
+		"Filter with --query status=new|reviewing|resolved|ignored. Needs ai_agents.manage_knowledge.",
+		"Each group has examples (with runId) and suggestions; fix gaps with Knowledge, not by inventing answers in the Playbook.",
+	],
+});
+command(["agents", "unresolved", "update"], "PATCH", "/agents/{id}/unresolved-questions/{groupId}", "Set the review status of an unresolved-question group.", {
+	args: ["id", "groupId"],
+	body: true,
+	gotchas: ["Body: { status: new|reviewing|resolved|ignored }. Mark resolved only after the Knowledge or Playbook fix is saved."],
+});
+command(["agents", "feedback"], "GET", "/agents/{id}/answer-feedback", "Summarize thumbs-up/down feedback on the agent's replies, clustered by reason.", {
+	args: ["id"],
+	gotchas: [
+		"--query days=N picks the window (1–180, default 30); --limit sets the number of clusters (1–50, default 10). Needs ai_agents.manage_knowledge.",
+		"Returns stats (positive, negative, negativeRate, byReason) and clusters with examples and conversationIds.",
+	],
+});
+command(["agents", "deployments", "list"], "GET", "/agents/{id}/deployments", "List sanitized AI agent deployments.", { args: ["id"], pagination: "offset" });
+command(["agents", "deployments"], "GET", "/agents/{id}/deployments", "List sanitized AI agent deployments.", {
+	args: ["id"],
+	pagination: "offset",
+	hidden: true,
+	aliasOf: ["agents", "deployments", "list"],
+});
+command(["agents", "deployments", "targets"], "GET", "/agents/{id}/deployment-targets", "List Inbox channels the agent can be deployed to.", {
+	args: ["id"],
+	pagination: "offset",
+	gotchas: ["Tickets are always available as { targetType: \"ticket\", targetId: null } and are not listed."],
+});
+command(["agents", "deployments", "create"], "POST", "/agents/{id}/deployments", "Deploy the agent to an Inbox channel, all Inbox channels, or Tickets.", {
+	args: ["id"],
+	body: true,
+	gotchas: [
+		"Body: { targetType: inbox_channel|ticket, targetId?: string|null, mode?, enabled? }. inbox_channel: targetId is a channel from agents deployments targets, or null for all Inbox channels. ticket: targetId must be null.",
+		"mode: auto_reply|suggest_reply|internal_note|action_only|triage_only (default auto_reply for Inbox, suggest_reply for tickets). auto_reply answers real customers: confirm the agent is published and tested.",
+		"Needs ai_agents.deploy.",
+	],
+});
+command(["agents", "deployments", "update"], "PATCH", "/agents/{id}/deployments/{deploymentId}", "Change a deployment's mode or turn it on or off.", {
+	args: ["id", "deploymentId"],
+	body: true,
+	gotchas: ["Body: { mode?, enabled? }. Needs ai_agents.deploy."],
+});
+command(["agents", "deployments", "delete"], "DELETE", "/agents/{id}/deployments/{deploymentId}", "Remove a deployment; the agent stops working on that target.", {
+	args: ["id", "deploymentId"],
+	gotchas: ["Needs ai_agents.deploy. To pause instead, update it with { enabled: false }."],
+});
+command(["agents", "guidance", "list"], "GET", "/agents/{id}/guidance", "List the agent's always-on guidance rules.", { args: ["id"], pagination: "offset" });
+command(["agents", "guidance", "create"], "POST", "/agents/{id}/guidance", "Add an always-on guidance rule.", {
+	args: ["id"],
+	body: true,
+	gotchas: [
+		"Body: { category, title, instruction, channel?, priority?, enabled? }; category: communication_style|clarification|content_sources|escalation|policy.",
+		"Guidance is a short standing rule. Facts belong in Knowledge; multi-step flows belong in the Playbook.",
+	],
+});
+command(["agents", "guidance", "update"], "PATCH", "/agents/{id}/guidance/{guidanceId}", "Edit or toggle a guidance rule.", { args: ["id", "guidanceId"], body: true });
+command(["agents", "guidance", "delete"], "DELETE", "/agents/{id}/guidance/{guidanceId}", "Delete a guidance rule.", { args: ["id", "guidanceId"] });
+command(["agents", "procedures", "list"], "GET", "/agents/{id}/procedures", "List the agent's procedures (deterministic multi-step flows).", {
+	args: ["id"],
+	pagination: "offset",
+	gotchas: ["source: playbook procedures are compiled from Playbook flows; change them by editing the Playbook."],
+});
+command(["agents", "procedures", "get"], "GET", "/agents/{id}/procedures/{procedureId}", "Get one procedure with its steps.", { args: ["id", "procedureId"] });
+const PROCEDURE_BODY_GOTCHAS = [
+	"Body: { name, description?, status?, trigger?, triggerIntents?, channels?, modes?, steps }. steps: { type: \"collect_fields\", fields, required? } | { type: \"tool\", name, required?, requiresApproval?, config? } | { type: \"instruction\", text }.",
+	"Tool steps must name a tool agents tools lists with allowed: true, or the server returns 422.",
+	"Prefer a Playbook flow when the user edits behavior in the Playbook; create manual procedures only when asked.",
+];
+command(["agents", "procedures", "create"], "POST", "/agents/{id}/procedures", "Create a manual procedure.", { args: ["id"], body: true, gotchas: PROCEDURE_BODY_GOTCHAS });
+command(["agents", "procedures", "update"], "PATCH", "/agents/{id}/procedures/{procedureId}", "Edit a manual procedure.", {
+	args: ["id", "procedureId"],
+	body: true,
+	gotchas: ["Procedures with source: playbook return 409: edit the Playbook flow instead.", ...PROCEDURE_BODY_GOTCHAS.slice(0, 2)],
+});
+command(["agents", "procedures", "delete"], "DELETE", "/agents/{id}/procedures/{procedureId}", "Delete a manual procedure.", {
+	args: ["id", "procedureId"],
+	gotchas: ["Procedures with source: playbook return 409: remove the flow from the Playbook instead."],
+});
 command(["agents", "knowledge", "list"], "GET", "/agents/{id}/knowledge-sources", "List an AI agent's knowledge sources.", { args: ["id"], pagination: "offset" });
 command(["agents", "knowledge", "add"], "POST", "/agents/{id}/knowledge-sources", "Add an AI agent knowledge source.", { args: ["id"], body: true });
 command(["agents", "knowledge", "delete"], "DELETE", "/agents/{id}/knowledge-sources/{sourceId}", "Remove an AI agent knowledge source.", { args: ["id", "sourceId"] });
 command(["agents", "knowledge", "reindex"], "POST", "/agents/{id}/knowledge-sources/{sourceId}/reindex", "Reindex or resync an AI agent knowledge source.", { args: ["id", "sourceId"] });
-command(["agents", "deployments"], "GET", "/agents/{id}/deployments", "List sanitized AI agent deployments.", { args: ["id"], pagination: "offset" });
-command(["agents", "publish"], "POST", "/agents/{id}/publish", "Publish the reviewed AI agent draft.", { args: ["id"] });
 command(["agents", "test", "start"], "POST", "/agents/{id}/test-conversations", "Start an isolated draft test conversation with simulated write actions.", { args: ["id"], body: true });
 command(["agents", "test", "messages"], "GET", "/agents/{id}/test-conversations/{conversationId}/messages", "List messages in an AI agent test conversation.", { args: ["id", "conversationId"], pagination: "cursor" });
 command(["agents", "test", "send"], "POST", "/agents/{id}/test-conversations/{conversationId}/messages", "Send a customer-side message into an AI agent test conversation.", { args: ["id", "conversationId"], body: true });
@@ -1527,6 +1711,7 @@ function publicCommand(item) {
 }
 function catalog(prefix = []) {
 	return COMMANDS.filter((item) =>
+		!item.hidden &&
 		prefix.every((token, index) => item.tokens[index] === token),
 	).map(publicCommand);
 }
@@ -2968,16 +3153,20 @@ async function main() {
 		);
 	}
 	const values = positionals.slice(selected.tokens.length);
+	// Hidden backward-compatible aliases run (and render breadcrumbs as) their canonical command.
+	const target = selected.aliasOf
+		? COMMANDS.find((item) => item.tokens.join(" ") === selected.aliasOf.join(" "))
+		: selected;
 	const expected = selected.args || [];
 	if (values.length < expected.length)
-		fail(`Usage: ${publicCommand(selected).usage}`);
+		fail(`Usage: ${publicCommand(target).usage}`);
 	let path = selected.path;
 	const commandArgs = {};
 	expected.forEach((name, index) => {
 		commandArgs[name] = values[index];
 		path = path.replace(`{${name}}`, encodeURIComponent(values[index]));
 	});
-	OUTPUT_CONTEXT = { item: selected, args: commandArgs };
+	OUTPUT_CONTEXT = { item: target, args: commandArgs };
 	if (selected.file) {
 		if (options.data !== undefined) fail("File upload commands take a file path argument, not --data.");
 		await runFileUpload(path, values[selected.fileArg ?? 0], options);
