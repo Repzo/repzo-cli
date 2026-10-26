@@ -151,9 +151,21 @@ A Flow becomes live (it calls Workstation while the customer fills it in) when i
 
 Appointment and order Flows rely on screen `action` bindings (`booking_*`, `order_*`) and the fields their starters create. Start from the `appointment` or `order` starter and change only wording, labels, and extra questions. Appointment Flows also need `bookingLinkId` set to an active booking link.
 
+### Booking portal fields (appointment Flows)
+
+A booking portal can ask customers for extra contact properties (such as date of birth or skin type) on top of name, email, and phone. An appointment Flow asks them on its Book appointment screen (`action: booking_book`), and the answers are saved on the customer's contact with the booking, exactly like a web booking.
+
+1. `repzo inbox whatsapp-flows get <id>` returns `bookingProperties` for appointment Flows: each portal property with its `label`, `type`, `required`, `binding` (`booking.property.<key>`), and a ready `field`.
+2. Copy each `field` into the `booking_book` screen's `fields`. You may change its `id` and `label` (keep labels short: 20 characters for text and dropdowns, 30 for single and multiple choice, 40 for dates). Keep `type`, `inputType`, `runtimeBinding`, and `required`, and leave `options` empty: choices come from the live property when the customer opens the screen.
+3. Every required property must be on that screen; optional ones are up to you. `problems` names any that are missing ("Add the booking field «Date of birth» to the details screen.").
+4. A property whose `field` is `null` can't be asked on WhatsApp (for example a choice with no options). If it's required, the portal owner has to make it optional in the booking portal; `problems` says so.
+
+The customer's phone is always their WhatsApp number. If the portal later adds a required property, the Flow keeps booking but `problems` asks you to add it, and the customer sees "<Property> is required." until you do. Older appointment Flows without `componentVersion: 2` can't hold these fields; open them in the Inbox builder once to upgrade.
+
 ## Troubleshooting
 
 - `problems` is not empty: fix each message; `flow-json` returns 422 with the same list until then.
+- "Add the booking field «X» to the details screen": copy that property's `field` from `bookingProperties` into the `booking_book` screen (see Booking portal fields).
 - 409 on update: the Flow is published (duplicate it) or someone saved in between (re-read).
 - 422 "Reconnect this WhatsApp channel": the channel lost its Meta connection; the user must reconnect it in Inbox.
 - 502 `upstream_error`: Meta rejected the call; report its message as written.
