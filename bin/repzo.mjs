@@ -877,18 +877,86 @@ command(
 	"Get a Send campaign.",
 	{ args: ["id"] },
 );
+// One-off sends go through POST /send/dispatch; the command fixes sendCategory
+// (marketing/sales must go through a campaign).
 command(
 	["send", "transactional"],
 	"POST",
-	"/send/transactional",
+	"/send/dispatch",
 	"Send a transactional message.",
-	{ body: true },
+	{
+		body: true,
+		bodyFields: { sendCategory: "transactional" },
+		gotchas: ["Sends through POST /send/dispatch with sendCategory \"transactional\" set for you. Body: { contactId | identifier, deliveryChannel, templateId? | payload?, idempotencyKey?, … }."],
+	},
 );
-command(["send", "system"], "POST", "/send/system", "Send a system message.", {
+command(["send", "system"], "POST", "/send/dispatch", "Send a system message.", {
 	body: true,
+	bodyFields: { sendCategory: "system" },
+	gotchas: ["Sends through POST /send/dispatch with sendCategory \"system\" set for you."],
 });
-command(["send", "event"], "POST", "/send/events", "Record a Send event.", {
+const SEND_EVENT_RECORD_GOTCHAS = [
+	"Body: { name, <identifier>, properties?, occurredAt?, dedupeKey?, context? }. Needs tracking:write (older send:write keys still work).",
+	"The event type's primaryObject decides the identifier, tried in this order: contact → contactId, identityId, match, email, phone; account → accountId, match, domain; deal → dealId, match; ticket → ticketId, ticketNumber, match.",
+	"match: { property, value } finds the record by a property whose value is unique (a native name such as externalId, or custom_<definitionId>). None → 422 no_match; several → 422 ambiguous_match.",
+	"createContact: true (contact events only) creates a contact from email or phone when none matches. The contact block (firstName, lastName, phone, company, title, source, utm*, gclid, fbclid) fills only that new contact, never an existing one.",
+	"Pass a stable dedupeKey: a repeat with the same name and dedupeKey returns 200 with duplicate: true and records nothing. Recorded events can't be edited or deleted.",
+	"Rejections return 422 { error: { code, message } } (invalid_payload, invalid_name, archived_event, no_match, ambiguous_match, invalid_property, limit_exceeded); 429 monthly_limit. Requests are limited to 120/min per credential, so use send events batch for many events.",
+];
+command(["send", "event"], "POST", "/send/events", "Record one event (something a contact, account, deal, or ticket did).", {
 	body: true,
+	gotchas: SEND_EVENT_RECORD_GOTCHAS,
+});
+command(["send", "events", "record"], "POST", "/send/events", "Record one event (something a contact, account, deal, or ticket did).", {
+	body: true,
+	hidden: true,
+	aliasOf: ["send", "event"],
+});
+command(["send", "events", "batch"], "POST", "/send/events/batch", "Record up to 500 events in one request; inspect per-event results.", {
+	body: true,
+	gotchas: [
+		"Body: { events: [1–500 bodies shaped like send event] }. Each event is checked and recorded on its own, in order; one bad event never blocks the rest.",
+		"HTTP 200 can include rejections: inspect recorded, duplicates, rejected, and results[] ({ index, status: recorded|duplicate|rejected, id?, code?, message? }). Fix and resend only the rejected items.",
+		"Give every event a dedupeKey so resending a whole batch after a failure records nothing twice. 400 means the batch itself is invalid (events missing, empty, or over 500).",
+		"Once the workspace's monthly event limit is reached, the remaining events are rejected with monthly_limit.",
+	],
+});
+command(["send", "events", "list"], "GET", "/send/events", "List recorded events, newest first.", {
+	pagination: "offset",
+	gotchas: [
+		"Needs tracking:read. Filter with --query name=EVENT_NAME, contactId, accountId, dealId, ticketId, identityId, objectType=contact|account|deal|ticket|none, source=api|widget|internal|import, occurredAfter=ISO, occurredBefore=ISO (inclusive).",
+		"Unknown query parameters (including --q) return 422 validation_error.",
+	],
+});
+command(["send", "events", "get"], "GET", "/send/events/{id}", "Get one recorded event with its properties and auto-filled context.", {
+	args: ["id"],
+});
+command(["send", "event-types", "list"], "GET", "/send/event-types", "List the event type catalog: defined and learned event names.", {
+	pagination: "offset",
+	gotchas: [
+		"Filter with --query q=TEXT (name or label), status=active|archived, origin=manual|auto, primaryObject=contact|account|deal|ticket|none.",
+		"origin manual = defined in Workstation or the API, so occurrences' properties are checked strictly; origin auto = learned from incoming events.",
+	],
+});
+command(["send", "event-types", "get"], "GET", "/send/event-types/{name}", "Get one event type with its primary record and properties.", {
+	args: ["name"],
+});
+command(["send", "event-types", "create"], "POST", "/send/event-types", "Define an event type, the record it is about, and its properties.", {
+	body: true,
+	gotchas: [
+		"Body: { name, label?, description?, primaryObject?: contact|account|deal|ticket|none (default contact), captureContext? (default true), properties?: [{ name, type, label?, description?, options? }] }.",
+		"Property types: text, long_text, number, currency, boolean, date, datetime, select, multi_select (with options), url, email, phone, country.",
+		"Defined types are strict: an occurrence with a property that isn't defined or doesn't fit its type is rejected with invalid_property. 409 if the name exists; up to 500 types per workspace.",
+	],
+});
+command(["send", "event-types", "update"], "PATCH", "/send/event-types/{name}", "Change, archive, or restore an event type.", {
+	args: ["name"],
+	body: true,
+	gotchas: [
+		"Body: any of label, description, primaryObject, captureContext, properties (replaces the whole list), archived. The name can't be changed: campaigns, segments, and goals refer to it.",
+		"archived: true rejects new occurrences with archived_event; archived: false restores the type.",
+		"Editing a learned (origin auto) type makes it manual, so its properties are then checked strictly. Get the type first and send the full properties list.",
+	],
 });
 command(
 	["send", "opt-out"],
@@ -1335,6 +1403,7 @@ function renderCommand(item, record) {
 	const args = (item.args || []).map((name) => {
 		const known = OUTPUT_CONTEXT?.args?.[name];
 		if (known !== undefined) return quoteArgument(known);
+		if (name === "name" && typeof record?.name === "string") return quoteArgument(record.name);
 		if (record?.id !== undefined) return quoteArgument(record.id);
 		return `<${name}>`;
 	});
@@ -1405,6 +1474,15 @@ function inferBreadcrumbs(data, meta) {
 			breadcrumbs.push(breadcrumb("get", renderCommand(get, record), "Verify the updated record"));
 		}
 	}
+	const eventGet = COMMANDS.find((item) => item.tokens.join(" ") === "send events get");
+	if (current.tokens.join(" ") === "send event" && data?.id && eventGet) {
+		breadcrumbs.push(breadcrumb("get", renderCommand(eventGet, data), "Read the recorded event"));
+	}
+	if (current.tokens.join(" ") === "send events batch" && get && Array.isArray(data?.results)) {
+		for (const result of data.results.filter((item) => item?.status === "recorded" && item.id).slice(0, 3)) {
+			breadcrumbs.push(breadcrumb("get", renderCommand(get, result), "Read a recorded event"));
+		}
+	}
 	if (action === "list" && get) {
 		for (const record of records.slice(0, 3)) {
 			if (!record || typeof record !== "object" || !record.id) continue;
@@ -1460,6 +1538,13 @@ function inferSummary(data) {
 	if (OUTPUT_CONTEXT?.item?.tokens.at(-1) === "bulk-update" && Array.isArray(data?.results))
 		return `${data.succeeded}/${data.total} records updated; ${data.failed} failed`;
 	if (data?.dryRun) return `${data.method} request previewed; nothing was sent`;
+	const commandName = OUTPUT_CONTEXT?.item?.tokens.join(" ");
+	if (commandName === "send events batch" && Array.isArray(data?.results))
+		return `${data.recorded ?? 0} recorded, ${data.duplicates ?? 0} duplicate, ${data.rejected ?? 0} rejected of ${data.results.length} events`;
+	if (commandName === "send event" && typeof data?.duplicate === "boolean")
+		return data.duplicate
+			? "Duplicate: an event with this name and dedupeKey was already recorded; nothing new was recorded"
+			: "Event recorded";
 	return (
 		OUTPUT_CONTEXT?.item?.description?.replace(/\.$/, "") || "Command completed"
 	);
@@ -3172,9 +3257,13 @@ async function main() {
 		await runFileUpload(path, values[selected.fileArg ?? 0], options);
 		return;
 	}
-	const body = await readBody(options.data);
-	if (selected.body && body === undefined)
+	const read = await readBody(options.data);
+	if (selected.body && read === undefined)
 		fail(`${selected.method} requires --data JSON, @file, or @-.`);
+	// Fields a command always sends (e.g. sendCategory for `send transactional`).
+	const body = selected.bodyFields && read && typeof read === "object" && !Array.isArray(read)
+		? { ...read, ...selected.bodyFields }
+		: read;
 	await runApi(selected.method, path, body, options, selected.pagination, selected.mutation);
 }
 
