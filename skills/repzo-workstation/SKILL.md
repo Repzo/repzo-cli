@@ -1,6 +1,6 @@
 ---
 name: repzo-workstation
-description: Inspect and operate Repzo Workstation through the bundled `repzo` CLI backed by the public REST API. Use for bulk updates, finding and merging duplicate accounts or contacts, CRM records, contacts, accounts, deals, activities, search, timelines, comments, attachments, notifications, approvals, products, pipelines, commerce, reports, appointments, projects, tickets, requests, tags, associations, forms, segments, campaigns, email templates (Unlayer designs or HTML), WhatsApp Flows (in-chat forms, booking, and order Flows), content, import/export jobs, Inbox, chat, voice, Send, Send events and event types (recording custom events, tracking), event subscriptions (outbound webhooks), metadata, agent setup, or API troubleshooting.
+description: Inspect and operate Repzo Workstation through the bundled `repzo` CLI backed by the public REST API. Use for bulk updates, finding and merging duplicate accounts or contacts, CRM records, contacts, accounts, deals, activities, search, timelines, comments, attachments, notifications, approvals, products, pipelines, commerce, reports, appointments, projects, tickets, requests, tags, associations, forms, segments, campaigns, email templates (Unlayer designs or HTML), WhatsApp Flows (in-chat forms, booking, and order Flows), content, import/export jobs, Inbox, chat, voice, Send campaigns (email and WhatsApp sends, event-started sends), Send events and event types (recording custom events, tracking), event subscriptions (outbound webhooks), metadata, agent setup, or API troubleshooting.
 ---
 
 # Repzo Workstation
@@ -55,7 +55,7 @@ Read only the references needed for the task:
 - Products, pipelines, stages, price offers, carts, orders, invoices, or line items: [references/sales-commerce.md](references/sales-commerce.md)
 - Tickets, projects, appointments, request types, or approval queues/decisions: [references/service-operations.md](references/service-operations.md)
 - Chat messages, Markdown, Slack Block Kit blocks, buttons and interactive controls, threads, edits, ephemeral messages, modals, App Home, or idempotent sends: [references/chat-messages.md](references/chat-messages.md)
-- Inbox, notifications, voice, Send, Send events and event types, or event subscriptions (outbound webhooks): [references/communications.md](references/communications.md)
+- Inbox, notifications, voice, Send campaigns (create, test, launch, deliveries, stats), Send events and event types, or event subscriptions (outbound webhooks): [references/communications.md](references/communications.md)
 - Campaigns, forms, segments, collections, or articles: [references/marketing-content.md](references/marketing-content.md)
 - Email templates in Settings → Email templates, Unlayer designs, or HTML email bodies: [references/email-templates.md](references/email-templates.md)
 - WhatsApp Flows: building, editing, syncing, publishing, or test-sending in-chat WhatsApp forms, booking, and order Flows: [references/whatsapp-flows.md](references/whatsapp-flows.md)

@@ -143,6 +143,22 @@ repzo inbox whatsapp-flows send-test FLOW_ID --data '{"to":"+962790000000","body
 
 Each Flow response lists `problems` that would stop the sync. Updates need the `revision` from your last read, and published Flows are locked, so duplicate one to change it. See the [WhatsApp Flows skill reference](skills/repzo-workstation/references/whatsapp-flows.md).
 
+## Send campaigns
+
+Build email and WhatsApp campaigns as drafts, test them, and launch them. Look up sender, subscription, segment, template, and event ids first:
+
+```bash
+repzo send brands list
+repzo send subscription-types list
+repzo send campaigns create --data @campaign.json --dry-run
+repzo send campaigns test CAMPAIGN_ID --data '{"identifier":"you@example.com"}' --yes
+repzo send campaigns skip-preview CAMPAIGN_ID
+repzo send campaigns launch CAMPAIGN_ID --yes
+repzo send campaigns deliveries CAMPAIGN_ID --query 'status=bounced'
+```
+
+`emailTemplateId` copies a saved email template into the campaign. An event-started send needs `"mode":"continuous"`, `"triggerType":"event"`, and `triggerConfig.eventName`. Transactional and system sends have no audience; marketing and sales need `segmentId` or `audienceFilters` (`repzo send audience estimate` counts matches without `--yes`). Launch returns status `pending_approval` when an approver must run `send campaigns approve`. `pause`, `resume`, `complete`, `archive`, `clone`, `reject`, `update`, and `delete` cover the rest of the lifecycle. These commands need the `send:read` / `send:write` scopes. See the [communications skill reference](skills/repzo-workstation/references/communications.md#send-campaigns).
+
 ## Send events
 
 Record what contacts, accounts, deals, and tickets do (for example `plan_upgraded`) so event-triggered campaigns, goals, segments, and timelines can use it. Send many events with one batch call; the API allows 120 requests per minute:
