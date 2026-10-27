@@ -806,5 +806,24 @@
 			"whatsapp-flows delete"
 		],
 		"maxCommands": 8
+	},
+	{
+		"name": "send-events-many-use-batch",
+		"task": "Record a signup_completed event for each of these 300 contacts by email; the events are already in events.json as { \"events\": [...] } with a dedupeKey on each.",
+		"context": "The Repzo CLI is available and recording these events is authorized.",
+		"tags": [
+			"cli",
+			"mutation",
+			"send",
+			"events"
+		],
+		"expectSequence": [
+			"^cli send events batch .*@events\\.json.*--dry-run",
+			"^cli send events batch .*@events\\.json.*--yes"
+		],
+		"reject": [
+			"^cli send event --data"
+		],
+		"maxCommands": 6
 	}
 ]

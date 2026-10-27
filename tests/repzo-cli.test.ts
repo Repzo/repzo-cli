@@ -253,6 +253,17 @@ describe("Repzo CLI v2", () => {
 		});
 	});
 
+	it("sends transactional and system messages through /send/dispatch with their category", async () => {
+		const body = { contactId: "c-1", deliveryChannel: "email", payload: { subject: "Hi" } };
+		for (const [command, sendCategory] of [["transactional", "transactional"], ["system", "system"]] as const) {
+			const preview = await runCli(["send", command, "--data", JSON.stringify({ ...body, sendCategory: "marketing" }), "--dry-run"]);
+			expect(preview.code).toBe(0);
+			expect(JSON.parse(preview.stdout).data).toMatchObject({
+				dryRun: true, method: "POST", url: expect.stringContaining("/api/v1/send/dispatch"), body: { ...body, sendCategory },
+			});
+		}
+	});
+
 	it("discovers email template commands and previews design and HTML bodies", async () => {
 		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
 		for (const [command, method, path, args, mutation, requiresBody] of [
@@ -325,6 +336,64 @@ describe("Repzo CLI v2", () => {
 		});
 		const send = await runCli(["inbox", "whatsapp-flows", "send-test", "flow-1"]);
 		expect(send.code).not.toBe(0);
+	});
+
+	it("discovers Send event and event type commands and previews their mutations", async () => {
+		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
+		for (const [command, method, path, args, mutation, requiresBody, pagination] of [
+			["event", "POST", "/send/events", [], true, true, null],
+			["events batch", "POST", "/send/events/batch", [], true, true, null],
+			["events list", "GET", "/send/events", [], false, false, "offset"],
+			["events get", "GET", "/send/events/{id}", ["id"], false, false, null],
+			["event-types list", "GET", "/send/event-types", [], false, false, "offset"],
+			["event-types get", "GET", "/send/event-types/{name}", ["name"], false, false, null],
+			["event-types create", "POST", "/send/event-types", [], true, true, null],
+			["event-types update", "PATCH", "/send/event-types/{name}", ["name"], true, true, null],
+		] as const) {
+			expect(catalog).toContainEqual(expect.objectContaining({
+				command: `send ${command}`, method, path, arguments: args, mutation, requiresBody, pagination,
+			}));
+		}
+		// The alias runs the canonical command but stays out of the catalog.
+		expect(catalog.some((entry: { command: string }) => entry.command === "send events record")).toBe(false);
+		// Outbound webhook subscriptions are a separate family and stay untouched.
+		expect(catalog).toContainEqual(expect.objectContaining({ command: "events subscriptions list", path: "/events/subscriptions" }));
+
+		const gotchas = (command: string) => catalog.find((entry: { command: string }) => entry.command === command).gotchas.join(" ");
+		expect(gotchas("send event")).toContain("dedupeKey");
+		expect(gotchas("send event")).toContain("createContact");
+		expect(gotchas("send event")).toContain("120/min");
+		expect(gotchas("send events batch")).toContain("results[]");
+		expect(gotchas("send event-types update")).toContain("archived");
+
+		const event = { name: "plan_upgraded", email: "maya@example.com", properties: { plan: "pro" }, dedupeKey: "inv-1042" };
+		for (const tokens of [["send", "event"], ["send", "events", "record"]]) {
+			const preview = await runCli([...tokens, "--data", JSON.stringify(event), "--dry-run", "--idempotency-key", "plan-upgraded-1"]);
+			expect(preview.code).toBe(0);
+			expect(JSON.parse(preview.stdout).data).toMatchObject({
+				dryRun: true, method: "POST", body: event, idempotencyKey: "plan-upgraded-1",
+				url: expect.stringMatching(/\/api\/v1\/send\/events$/),
+			});
+		}
+		const batch = { events: [event, { ...event, email: "omar@example.com", dedupeKey: "inv-1043" }] };
+		const batchPreview = await runCli(["send", "events", "batch", "--data", JSON.stringify(batch), "--dry-run"]);
+		expect(batchPreview.code).toBe(0);
+		expect(JSON.parse(batchPreview.stdout).data).toMatchObject({
+			dryRun: true, method: "POST", body: batch, url: expect.stringContaining("/api/v1/send/events/batch"),
+		});
+		const typeBody = { name: "plan_upgraded", primaryObject: "contact", properties: [{ name: "plan", type: "select", options: [{ value: "pro" }] }] };
+		const create = await runCli(["send", "event-types", "create", "--data", JSON.stringify(typeBody), "--dry-run"]);
+		expect(create.code).toBe(0);
+		expect(JSON.parse(create.stdout).data).toMatchObject({
+			dryRun: true, method: "POST", body: typeBody, url: expect.stringMatching(/\/api\/v1\/send\/event-types$/),
+		});
+		const archive = await runCli(["send", "event-types", "update", "plan_upgraded", "--data", '{"archived":true}', "--dry-run"]);
+		expect(archive.code).toBe(0);
+		expect(JSON.parse(archive.stdout).data).toMatchObject({
+			dryRun: true, method: "PATCH", body: { archived: true }, url: expect.stringContaining("/api/v1/send/event-types/plan_upgraded"),
+		});
+		expect((await runCli(["send", "events", "batch", "--dry-run"])).code).toBe(1);
+		expect((await runCli(["send", "event-types", "update", "--data", "{}", "--dry-run"])).code).toBe(1);
 	});
 
 	it("discovers and previews Chat Block Kit, ephemeral, and view commands", async () => {
@@ -960,6 +1029,7 @@ describe("Repzo CLI v2", () => {
 		let bulkCalls: Array<{ body: unknown; key: string | undefined }> = [];
 		const chatCalls: Array<{ path: string; body: unknown }> = [];
 		const mergeCalls: Array<{ path: string; body: unknown }> = [];
+		const sendEventCalls: Array<{ path: string; body: unknown; key: string | undefined; query: unknown }> = [];
 		beforeAll(async () => {
 			const app = express();
 			app.use(express.json());
@@ -1043,6 +1113,42 @@ describe("Repzo CLI v2", () => {
 			app.delete("/api/v1/chat/messages/:id", (req, res) => {
 				chatCalls.push({ path: req.path, body: undefined });
 				res.status(204).end();
+			});
+			app.post("/api/v1/send/events/batch", (req, res) => {
+				sendEventCalls.push({ path: req.path, body: req.body, key: req.get("Idempotency-Key"), query: {} });
+				res.json({
+					recorded: 1, duplicates: 1, rejected: 1,
+					results: [
+						{ index: 0, status: "recorded", id: "event-1" },
+						{ index: 1, status: "duplicate" },
+						{ index: 2, status: "rejected", code: "no_match", message: "No contact matches." },
+					],
+				});
+			});
+			app.post("/api/v1/send/events", (req, res) => {
+				sendEventCalls.push({ path: req.path, body: req.body, key: req.get("Idempotency-Key"), query: {} });
+				if (req.body.dedupeKey === "seen") {
+					res.json({ id: null, ok: true, duplicate: true });
+					return;
+				}
+				if (!req.body.email) {
+					res.status(422).json({ error: { code: "no_match", message: "No contact matches this event." } });
+					return;
+				}
+				res.status(201).json({ id: "event-2", ok: true, duplicate: false });
+			});
+			app.get("/api/v1/send/events", (req, res) => {
+				sendEventCalls.push({ path: req.path, body: undefined, key: undefined, query: req.query });
+				res.json({
+					data: [{ id: "event-1", name: "plan_upgraded", objectType: "contact" }],
+					meta: { page: 1, limit: 20, total: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false },
+				});
+			});
+			app.get("/api/v1/send/event-types", (_req, res) => {
+				res.json({
+					data: [{ id: "type-uuid-1", name: "plan_upgraded", origin: "manual", primaryObject: "contact" }],
+					meta: { page: 1, limit: 20, total: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false },
+				});
 			});
 			app.post("/api/v1/reports/execute", (_req, res) => {
 				res.json({ data: [{ total: 3 }] });
@@ -1242,6 +1348,68 @@ describe("Repzo CLI v2", () => {
 			expect(deleted.code).toBe(0);
 			expect(chatCalls.at(-1)).toEqual({ path: "/api/v1/chat/messages/message-1", body: undefined });
 			expect(JSON.parse(deleted.stdout)).toMatchObject({ ok: true, data: { status: 204 } });
+		});
+
+		it("records Send events and reports per-event batch results", async () => {
+			const env = { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" };
+			const batch = { events: [
+				{ name: "signup_completed", email: "maya@example.com", dedupeKey: "signup-1" },
+				{ name: "signup_completed", email: "omar@example.com", dedupeKey: "signup-2" },
+				{ name: "signup_completed", email: "nobody@example.com", dedupeKey: "signup-3" },
+			] };
+			const args = ["send", "events", "batch", "--data", JSON.stringify(batch), "--idempotency-key", "signup-batch-1"];
+			const before = sendEventCalls.length;
+			expect((await runCli(args, { env })).code).toBe(1);
+			expect(sendEventCalls).toHaveLength(before);
+
+			const result = await runCli([...args, "--yes"], { env });
+			expect(result.code).toBe(0);
+			expect(sendEventCalls.at(-1)).toMatchObject({ path: "/api/v1/send/events/batch", body: batch, key: "signup-batch-1" });
+			expect(JSON.parse(result.stdout)).toMatchObject({
+				ok: true,
+				summary: "1 recorded, 1 duplicate, 1 rejected of 3 events",
+				data: { rejected: 1, results: expect.arrayContaining([
+					{ index: 2, status: "rejected", code: "no_match", message: "No contact matches." },
+				]) },
+				breadcrumbs: expect.arrayContaining([
+					expect.objectContaining({ cmd: "repzo send events get event-1" }),
+					expect.objectContaining({ cmd: "repzo send events list" }),
+				]),
+			});
+
+			const recorded = await runCli(["send", "event", "--data", '{"name":"plan_upgraded","email":"maya@example.com"}', "--yes"], { env });
+			expect(recorded.code).toBe(0);
+			expect(JSON.parse(recorded.stdout)).toMatchObject({
+				summary: "Event recorded",
+				data: { id: "event-2", duplicate: false },
+				breadcrumbs: [expect.objectContaining({ cmd: "repzo send events get event-2" })],
+			});
+
+			const duplicate = await runCli(["send", "events", "record", "--data", '{"name":"plan_upgraded","email":"maya@example.com","dedupeKey":"seen"}', "--yes"], { env });
+			expect(duplicate.code).toBe(0);
+			expect(JSON.parse(duplicate.stdout)).toMatchObject({
+				summary: expect.stringContaining("Duplicate"),
+				data: { id: null, duplicate: true },
+				meta: { command: "repzo send events record" },
+			});
+
+			const rejected = await runCli(["send", "event", "--data", '{"name":"plan_upgraded"}', "--yes"], { env });
+			expect(rejected.code).toBe(7);
+			expect(JSON.parse(rejected.stderr)).toMatchObject({
+				ok: false, error: { status: 422, message: "No contact matches this event." },
+			});
+		});
+
+		it("lists Send events with filters and links event types by name", async () => {
+			const env = { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" };
+			const events = await runCli(["send", "events", "list", "--query", "name=plan_upgraded", "--query", "occurredAfter=2026-10-01T00:00:00Z"], { env });
+			expect(events.code).toBe(0);
+			expect(sendEventCalls.at(-1)?.query).toMatchObject({ name: "plan_upgraded", occurredAfter: "2026-10-01T00:00:00Z" });
+			expect(JSON.parse(events.stdout).breadcrumbs).toContainEqual(expect.objectContaining({ cmd: "repzo send events get event-1" }));
+
+			const types = await runCli(["send", "event-types", "list"], { env });
+			expect(types.code).toBe(0);
+			expect(JSON.parse(types.stdout).breadcrumbs).toContainEqual(expect.objectContaining({ cmd: "repzo send event-types get plan_upgraded" }));
 		});
 
 		it("executes read-only POST commands without mutation confirmation", async () => {

@@ -140,3 +140,17 @@ repzo inbox whatsapp-flows send-test FLOW_ID --data '{"to":"+962790000000","body
 ```
 
 Each Flow response lists `problems` that would stop the sync. Updates need the `revision` from your last read, and published Flows are locked, so duplicate one to change it. See the [WhatsApp Flows skill reference](skills/repzo-workstation/references/whatsapp-flows.md).
+
+## Send events
+
+Record what contacts, accounts, deals, and tickets do (for example `plan_upgraded`) so event-triggered campaigns, goals, segments, and timelines can use it. Send many events with one batch call; the API allows 120 requests per minute:
+
+```bash
+repzo send event-types list --query 'status=active'
+repzo send event --data '{"name":"plan_upgraded","email":"maya@example.com","properties":{"plan":"pro"},"dedupeKey":"inv-1042"}' --dry-run
+repzo send events batch --data @events.json --yes
+repzo send events list --query 'name=plan_upgraded' --limit 50
+repzo send event-types update plan_upgraded --data '{"archived":true}' --yes
+```
+
+A batch is `{ "events": [ … ] }` with up to 500 events. HTTP 200 can still include rejected events, so check `rejected` and `results`. A repeat with the same name and `dedupeKey` is not recorded twice, and recorded events can't be edited or deleted. These commands need the `tracking:read` / `tracking:write` scopes (`send:*` keys still work). See the [communications skill reference](skills/repzo-workstation/references/communications.md#send-events).

@@ -60,7 +60,7 @@ repzo deals update DEAL_ID --data @deal-change.json --yes --if-match '"ETAG_FROM
 
 On a remote machine, use `repzo auth login --no-browser` and open the printed URL on the same machine that can reach the loopback callback.
 
-The browser flow uses PKCE, asks the signed-in user to choose scopes, and stores a rotating refresh credential. The resulting access remains limited by that user's live workspace role and visibility. Use `--token-stdin` for a `foxa-*` Developer App key in CI or other non-browser environments:
+The browser flow uses PKCE, asks the signed-in user to choose scopes, and stores a rotating refresh credential. The resulting access remains limited by that user's live workspace role and visibility. Scopes are per area; for example, Send events and event types need `tracking:read` / `tracking:write` (keys that already have `send:read` / `send:write` keep working), while sending messages needs `send:*`. Use `--token-stdin` for a `foxa-*` Developer App key in CI or other non-browser environments:
 
 ```bash
 printf '%s' "$REPZO_DEVELOPER_APP_TOKEN" | repzo auth login --profile ci --token-stdin
@@ -98,7 +98,7 @@ Handle exit codes as follows:
 - `7` / `api`: inspect status, details, metadata, and OpenAPI.
 - `8` / `ambiguous`: narrow the query or ask the user to choose.
 
-The CLI retries `429`, `502`, `503`, and `504` with bounded exponential backoff. Use `--no-retry` only when observing the first failure is important. Never retry non-idempotent mutations manually unless the response proves the server did not accept them.
+The public API allows 120 requests per minute per credential. For many records or events, use a batch or bulk command (`repzo send events batch`, `bulk-update`) instead of a loop of single calls. The CLI retries `429`, `502`, `503`, and `504` with bounded exponential backoff. Use `--no-retry` only when observing the first failure is important. Never retry non-idempotent mutations manually unless the response proves the server did not accept them.
 
 ## Coverage boundary
 
