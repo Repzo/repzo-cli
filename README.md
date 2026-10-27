@@ -61,6 +61,8 @@ repzo auth login --support --profile support-acme
 repzo contacts list --profile support-acme
 ```
 
+So a support login can't be confused with your own: it can never be the default profile, any change without `--profile` is refused while it's live, and each command prints where it runs, for example `→ Acme Trading · SUPPORT · acting as sara@acme.com · profile support-acme`. `repzo auth logout --profile support-acme` removes it.
+
 Check whether an installer-managed binary has an update available:
 
 ```bash
