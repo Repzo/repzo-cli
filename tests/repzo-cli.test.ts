@@ -400,6 +400,63 @@ describe("Repzo CLI v2", () => {
 		expect((await runCli(["send", "event-types", "update", "--data", "{}", "--dry-run"])).code).toBe(1);
 	});
 
+	it("discovers Send campaign commands and previews their mutations", async () => {
+		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
+		for (const [command, method, path, args, mutation, requiresBody, pagination] of [
+			["campaigns list", "GET", "/send/campaigns", [], false, false, "offset"],
+			["campaigns get", "GET", "/send/campaigns/{id}", ["id"], false, false, null],
+			["campaigns create", "POST", "/send/campaigns", [], true, true, null],
+			["campaigns update", "PATCH", "/send/campaigns/{id}", ["id"], true, true, null],
+			["campaigns delete", "DELETE", "/send/campaigns/{id}", ["id"], true, false, null],
+			["campaigns launch", "POST", "/send/campaigns/{id}/launch", ["id"], true, false, null],
+			["campaigns pause", "POST", "/send/campaigns/{id}/pause", ["id"], true, false, null],
+			["campaigns resume", "POST", "/send/campaigns/{id}/resume", ["id"], true, false, null],
+			["campaigns complete", "POST", "/send/campaigns/{id}/complete", ["id"], true, false, null],
+			["campaigns archive", "POST", "/send/campaigns/{id}/archive", ["id"], true, false, null],
+			["campaigns approve", "POST", "/send/campaigns/{id}/approve", ["id"], true, false, null],
+			["campaigns reject", "POST", "/send/campaigns/{id}/reject", ["id"], true, true, null],
+			["campaigns clone", "POST", "/send/campaigns/{id}/clone", ["id"], true, false, null],
+			["campaigns test", "POST", "/send/campaigns/{id}/test", ["id"], true, true, null],
+			["campaigns deliveries", "GET", "/send/campaigns/{id}/deliveries", ["id"], false, false, "offset"],
+			["campaigns skip-preview", "GET", "/send/campaigns/{id}/skip-preview", ["id"], false, false, null],
+			["audience estimate", "POST", "/send/audience/estimate", [], false, true, null],
+			["brands list", "GET", "/send/brands", [], false, false, "offset"],
+			["subscription-types list", "GET", "/send/subscription-types", [], false, false, "offset"],
+		] as const) {
+			expect(catalog).toContainEqual(expect.objectContaining({
+				command: `send ${command}`, method, path, arguments: args, mutation, requiresBody, pagination,
+			}));
+		}
+		const gotchas = (command: string) => catalog.find((entry: { command: string }) => entry.command === command).gotchas.join(" ");
+		expect(gotchas("send campaigns create")).toContain("emailTemplateId");
+		expect(gotchas("send campaigns create")).toContain("triggerType \"event\"");
+		expect(gotchas("send campaigns create")).toContain("send brands list");
+		expect(gotchas("send campaigns launch")).toContain("pending_approval");
+		expect(gotchas("send audience estimate")).not.toContain("--dry-run");
+
+		const body = {
+			name: "Welcome", sendCategory: "marketing", deliveryChannel: "email", emailTemplateId: "tmpl-1",
+			segmentId: "seg-1", mode: "continuous", triggerType: "event", triggerConfig: { eventName: "signup_completed" },
+		};
+		const create = await runCli(["send", "campaigns", "create", "--data", JSON.stringify(body), "--dry-run"]);
+		expect(create.code).toBe(0);
+		expect(JSON.parse(create.stdout).data).toMatchObject({
+			dryRun: true, method: "POST", body, url: expect.stringMatching(/\/api\/v1\/send\/campaigns$/),
+		});
+		const launch = await runCli(["send", "campaigns", "launch", "camp-1", "--dry-run"]);
+		expect(launch.code).toBe(0);
+		expect(JSON.parse(launch.stdout).data).toMatchObject({
+			dryRun: true, method: "POST", url: expect.stringContaining("/api/v1/send/campaigns/camp-1/launch"),
+		});
+		expect(JSON.parse(launch.stdout).data.body).toBeUndefined();
+		const clone = await runCli(["send", "campaigns", "clone", "camp-1", "--data", '{"name":"Welcome v2"}', "--dry-run"]);
+		expect(JSON.parse(clone.stdout).data).toMatchObject({ body: { name: "Welcome v2" }, url: expect.stringContaining("/send/campaigns/camp-1/clone") });
+		const reject = await runCli(["send", "campaigns", "reject", "camp-1", "--dry-run"]);
+		expect(reject.code).toBe(1);
+		expect(JSON.parse(reject.stderr).error.message).toContain("requires --data");
+		expect((await runCli(["send", "campaigns", "test", "camp-1", "--dry-run"])).code).toBe(1);
+	});
+
 	it("discovers and previews Chat Block Kit, ephemeral, and view commands", async () => {
 		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
 		const expected = [
@@ -1146,6 +1203,7 @@ describe("Repzo CLI v2", () => {
 		const chatCalls: Array<{ path: string; body: unknown }> = [];
 		const mergeCalls: Array<{ path: string; body: unknown }> = [];
 		const sendEventCalls: Array<{ path: string; body: unknown; key: string | undefined; query: unknown }> = [];
+		const sendCampaignCalls: Array<{ method: string; path: string; body: unknown; query: unknown }> = [];
 		beforeAll(async () => {
 			const app = express();
 			app.use(express.json());
@@ -1265,6 +1323,41 @@ describe("Repzo CLI v2", () => {
 					data: [{ id: "type-uuid-1", name: "plan_upgraded", origin: "manual", primaryObject: "contact" }],
 					meta: { page: 1, limit: 20, total: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false },
 				});
+			});
+			const campaign = (id: string, status: string) => ({ id, name: "Welcome", status, sendCategory: "marketing", deliveryChannel: "email" });
+			app.get("/api/v1/send/campaigns", (req, res) => {
+				sendCampaignCalls.push({ method: "GET", path: req.path, body: undefined, query: req.query });
+				res.json({
+					data: [campaign("camp-1", "live")],
+					meta: { page: 1, limit: 20, total: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false },
+				});
+			});
+			app.post("/api/v1/send/campaigns", (req, res) => {
+				sendCampaignCalls.push({ method: "POST", path: req.path, body: req.body, query: req.query });
+				res.status(201).json({ ...campaign("camp-new", "draft"), payload: { subject: "Hi {{contact.firstName}}" } });
+			});
+			app.get("/api/v1/send/campaigns/:id", (req, res) => {
+				sendCampaignCalls.push({ method: "GET", path: req.path, body: undefined, query: req.query });
+				res.json({ ...campaign(req.params.id, "live"), stats: { sent: 10, delivered: 9, openedUnique: 4 } });
+			});
+			app.post("/api/v1/send/campaigns/:id/launch", (req, res) => {
+				sendCampaignCalls.push({ method: "POST", path: req.path, body: req.body, query: req.query });
+				res.json(campaign(req.params.id, req.params.id === "needs-approval" ? "pending_approval" : "live"));
+			});
+			app.post("/api/v1/send/campaigns/:id/reject", (req, res) => {
+				sendCampaignCalls.push({ method: "POST", path: req.path, body: req.body, query: req.query });
+				res.json({ ...campaign(req.params.id, "draft"), rejectionReason: req.body.reason });
+			});
+			app.get("/api/v1/send/campaigns/:id/deliveries", (req, res) => {
+				sendCampaignCalls.push({ method: "GET", path: req.path, body: undefined, query: req.query });
+				res.json({
+					data: [{ id: "delivery-1", contactId: "contact-1", status: "bounced" }],
+					meta: { page: 1, limit: 20, total: 1, totalPages: 1, hasNextPage: false, hasPrevPage: false },
+				});
+			});
+			app.post("/api/v1/send/audience/estimate", (req, res) => {
+				sendCampaignCalls.push({ method: "POST", path: req.path, body: req.body, query: req.query });
+				res.json({ total: 42 });
 			});
 			app.post("/api/v1/reports/execute", (_req, res) => {
 				res.json({ data: [{ total: 3 }] });
@@ -1526,6 +1619,75 @@ describe("Repzo CLI v2", () => {
 			const types = await runCli(["send", "event-types", "list"], { env });
 			expect(types.code).toBe(0);
 			expect(JSON.parse(types.stdout).breadcrumbs).toContainEqual(expect.objectContaining({ cmd: "repzo send event-types get plan_upgraded" }));
+		});
+
+		it("creates, launches, rejects, and reports on Send campaigns", async () => {
+			const env = { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" };
+			const body = {
+				name: "Welcome", sendCategory: "marketing", deliveryChannel: "email", emailTemplateId: "tmpl-1",
+				payload: { preheader: "Hi" }, segmentId: "seg-1", mode: "continuous", triggerType: "event",
+				triggerConfig: { eventName: "signup_completed", filters: [{ property: "plan", operator: "equals", value: "pro" }] },
+			};
+			const before = sendCampaignCalls.length;
+			expect((await runCli(["send", "campaigns", "create", "--data", JSON.stringify(body)], { env })).code).toBe(1);
+			expect(sendCampaignCalls).toHaveLength(before);
+			const created = await runCli(["send", "campaigns", "create", "--data", JSON.stringify(body), "--yes"], { env });
+			expect(created.code).toBe(0);
+			expect(sendCampaignCalls.at(-1)).toMatchObject({ method: "POST", path: "/api/v1/send/campaigns", body });
+			expect(JSON.parse(created.stdout)).toMatchObject({
+				data: { id: "camp-new", status: "draft" },
+				breadcrumbs: expect.arrayContaining([
+					expect.objectContaining({ action: "test", cmd: expect.stringContaining("repzo send campaigns test camp-new") }),
+					expect.objectContaining({ cmd: "repzo send campaigns skip-preview camp-new" }),
+					expect.objectContaining({ cmd: "repzo send campaigns launch camp-new" }),
+				]),
+			});
+
+			const launched = await runCli(["send", "campaigns", "launch", "camp-1", "--yes"], { env });
+			expect(launched.code).toBe(0);
+			expect(sendCampaignCalls.at(-1)).toMatchObject({ method: "POST", path: "/api/v1/send/campaigns/camp-1/launch" });
+			expect(JSON.parse(launched.stdout)).toMatchObject({
+				data: { status: "live" },
+				breadcrumbs: expect.arrayContaining([expect.objectContaining({ cmd: "repzo send campaigns deliveries camp-1" })]),
+			});
+			const pending = await runCli(["send", "campaigns", "launch", "needs-approval", "--yes"], { env });
+			expect(JSON.parse(pending.stdout)).toMatchObject({
+				summary: expect.stringContaining("waiting for approval"),
+				breadcrumbs: expect.arrayContaining([expect.objectContaining({ cmd: "repzo send campaigns approve needs-approval" })]),
+			});
+
+			const calls = sendCampaignCalls.length;
+			expect((await runCli(["send", "campaigns", "reject", "camp-1", "--yes"], { env })).code).toBe(1);
+			expect(sendCampaignCalls).toHaveLength(calls);
+			const rejected = await runCli(["send", "campaigns", "reject", "camp-1", "--data", '{"reason":"Wrong segment"}', "--yes"], { env });
+			expect(rejected.code).toBe(0);
+			expect(sendCampaignCalls.at(-1)).toMatchObject({ path: "/api/v1/send/campaigns/camp-1/reject", body: { reason: "Wrong segment" } });
+
+			const deliveries = await runCli(["send", "campaigns", "deliveries", "camp-1", "--query", "status=bounced", "--query", "engagement=not_opened", "--limit", "50"], { env });
+			expect(deliveries.code).toBe(0);
+			expect(sendCampaignCalls.at(-1)).toMatchObject({
+				method: "GET", path: "/api/v1/send/campaigns/camp-1/deliveries", query: { status: "bounced", engagement: "not_opened", limit: "50" },
+			});
+			expect(JSON.parse(deliveries.stdout).data).toEqual([{ id: "delivery-1", contactId: "contact-1", status: "bounced" }]);
+		});
+
+		it("estimates a Send audience without confirmation and still lists and gets campaigns", async () => {
+			const env = { REPZO_BASE_URL: baseUrl, REPZO_TOKEN: "foxa-test" };
+			const audienceFilters = { operator: "and", rules: [{ field: "lifecycleStage", operator: "equals", value: "customer" }] };
+			const estimate = await runCli(["send", "audience", "estimate", "--data", JSON.stringify({ audienceFilters })], { env });
+			expect(estimate.code).toBe(0);
+			expect(sendCampaignCalls.at(-1)).toMatchObject({ method: "POST", path: "/api/v1/send/audience/estimate", body: { audienceFilters } });
+			expect(JSON.parse(estimate.stdout).data).toEqual({ total: 42 });
+
+			const list = await runCli(["send", "campaigns", "list"], { env });
+			expect(list.code).toBe(0);
+			expect(JSON.parse(list.stdout).breadcrumbs).toContainEqual(expect.objectContaining({ cmd: "repzo send campaigns get camp-1" }));
+			const get = await runCli(["send", "campaigns", "get", "camp-1"], { env });
+			expect(get.code).toBe(0);
+			expect(JSON.parse(get.stdout)).toMatchObject({
+				data: { id: "camp-1", stats: { sent: 10 } },
+				breadcrumbs: expect.arrayContaining([expect.objectContaining({ cmd: "repzo send campaigns deliveries camp-1" })]),
+			});
 		});
 
 		it("executes read-only POST commands without mutation confirmation", async () => {

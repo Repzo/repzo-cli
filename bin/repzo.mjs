@@ -878,9 +878,93 @@ command(
 	["send", "campaigns", "get"],
 	"GET",
 	"/send/campaigns/{id}",
-	"Get a Send campaign.",
-	{ args: ["id"] },
+	"Get a Send campaign with its content, audience, trigger, goal, and stats.",
+	{
+		args: ["id"],
+		gotchas: ["Returns payload, audience, triggerConfig, goal, brandId, approvalRequired, rejectionReason, and stats (sent, delivered, failed, bounced, openedUnique, clickedUnique, replied, complained, suppressed, unsubscribed, goalHits); stats refresh every few minutes."],
+	},
 );
+const SEND_CAMPAIGN_BODY_GOTCHAS = [
+	"Body: { name, sendCategory: marketing|sales|transactional|system, deliveryChannel: email|whatsapp, contentType?, payload?, emailTemplateId?, segmentId?, audienceFilters?, excludeSegmentIds?, subscriptionTypeId?, brandId?, channelAccountId?, mode?: fixed|continuous, triggerType?: manual|schedule|event, triggerConfig?, scheduleStart?, scheduleEnd?, timezone?, goal?: { event, label?, ttlDays: 1|3|7|30 }, frequencyConfig?, description? }. Creates a draft.",
+	"Email payload: { subject, preheader?, bodyHtml, designJson? (Unlayer design as a JSON string) }. {{contact.firstName}} and, for event-started sends, {{event.<property>}} fill per recipient.",
+	"emailTemplateId copies subject, bodyHtml, and designJson from a saved template (repzo email-templates list); keys you also put in payload win.",
+	"Marketing and sales need segmentId (repzo segments list) or audienceFilters (segment rule format; check the count with repzo send audience estimate). Transactional and system sends have no audience.",
+	"Event-started send: mode \"continuous\" + triggerType \"event\" + triggerConfig { eventName, filters?: [{ property, operator, value }] } (names from repzo send event-types list). event with mode fixed returns 422.",
+	"Ids: brandId from repzo send brands list (unset = workspace default sender), subscriptionTypeId from repzo send subscription-types list, channelAccountId (WhatsApp number) from repzo inbox whatsapp-channels list.",
+];
+command(["send", "campaigns", "create"], "POST", "/send/campaigns", "Create a draft Send campaign (email or WhatsApp).", {
+	body: true,
+	gotchas: SEND_CAMPAIGN_BODY_GOTCHAS,
+});
+command(["send", "campaigns", "update"], "PATCH", "/send/campaigns/{id}", "Edit a Send campaign.", {
+	args: ["id"],
+	body: true,
+	gotchas: [
+		"Body: any create field except sendCategory and deliveryChannel, which can't change. mode is locked after launch; launched campaigns accept only what the app allows.",
+		"payload replaces the whole payload: get the campaign first and send every payload key you want to keep.",
+	],
+});
+command(["send", "campaigns", "delete"], "DELETE", "/send/campaigns/{id}", "Delete a Send campaign that never sent.", {
+	args: ["id"],
+	gotchas: ["Only campaigns that never sent anything can be deleted; archive launched ones with send campaigns archive."],
+});
+const SEND_CAMPAIGN_ACTIONS = {
+	launch: ["Launch a draft Send campaign.", [
+		"Run send campaigns test and send campaigns skip-preview first. 422 explains what is missing before it can launch; fix it with send campaigns update.",
+		"Returns the campaign; status pending_approval means an approver must run send campaigns approve before it goes out.",
+	]],
+	pause: ["Pause a live Send campaign.", []],
+	resume: ["Resume a paused Send campaign.", []],
+	complete: ["Mark a Send campaign complete so it stops sending.", []],
+	archive: ["Archive a Send campaign.", ["Use this for campaigns that already sent; delete only works for ones that never sent."]],
+};
+for (const [action, [description, gotchas]] of Object.entries(SEND_CAMPAIGN_ACTIONS))
+	command(["send", "campaigns", action], "POST", `/send/campaigns/{id}/${action}`, description, {
+		args: ["id"],
+		gotchas: ["No body. Returns the campaign with its new status.", ...gotchas],
+	});
+command(["send", "campaigns", "approve"], "POST", "/send/campaigns/{id}/approve", "Approve a Send campaign waiting for approval.", {
+	args: ["id"],
+	gotchas: ['Optional --data \'{ "notes": "…" }\'. Only for status pending_approval.'],
+});
+command(["send", "campaigns", "reject"], "POST", "/send/campaigns/{id}/reject", "Reject a Send campaign waiting for approval.", {
+	args: ["id"],
+	body: true,
+	gotchas: ["Body: { reason } (required). The reason shows on the campaign as rejectionReason."],
+});
+command(["send", "campaigns", "clone"], "POST", "/send/campaigns/{id}/clone", "Copy a Send campaign into a new draft.", {
+	args: ["id"],
+	gotchas: ['Optional --data \'{ "name": "New name" }\'. The copy defaults to "<name> (Copy)" and returns 201 with the new draft.'],
+});
+command(["send", "campaigns", "test"], "POST", "/send/campaigns/{id}/test", "Send a test of a Send campaign to one address or contact.", {
+	args: ["id"],
+	body: true,
+	gotchas: [
+		"Body: { identifier } (email or phone) or { contactId } to fill tokens with that contact. One is required.",
+		"Sends a real message whose subject starts with [TEST]. Skips frequency caps and subscriptions; suppressions still apply. Only send to an address the user gave you.",
+	],
+});
+command(["send", "campaigns", "deliveries"], "GET", "/send/campaigns/{id}/deliveries", "List a Send campaign's deliveries, one per recipient.", {
+	args: ["id"],
+	pagination: "offset",
+	gotchas: ["Filter with --query status=pending|sending|sent|delivered|failed|bounced|dismissed|suppressed|unsubscribed|deferred, contactId=UUID, engagement=opened|not_opened|clicked|not_clicked."],
+});
+command(["send", "campaigns", "skip-preview"], "GET", "/send/campaigns/{id}/skip-preview", "Preview how many recipients a Send campaign would skip, and why.", {
+	args: ["id"],
+	gotchas: ["Counts opt-outs, suppressions, frequency caps, and exclusions. Run it before launch."],
+});
+command(["send", "audience", "estimate"], "POST", "/send/audience/estimate", "Count contacts matching audience rules right now.", {
+	body: true,
+	mutation: false,
+	gotchas: ["Body: { audienceFilters } in segment rule format. Returns { total } before opt-outs, suppressions, and caps. Read-only: needs send:read and no --yes."],
+});
+command(["send", "brands", "list"], "GET", "/send/brands", "List sender addresses to use as a campaign brandId.", {
+	pagination: "offset",
+	gotchas: ["Each brand has fromName, fromEmail, replyToEmail, isDefault, emailVerified, and domainAuthenticated. Campaigns without brandId use the isDefault brand."],
+});
+command(["send", "subscription-types", "list"], "GET", "/send/subscription-types", "List subscription types to use as a campaign subscriptionTypeId.", {
+	pagination: "offset",
+});
 // One-off sends go through POST /send/dispatch; the command fixes sendCategory
 // (marketing/sales must go through a campaign).
 command(
@@ -1441,6 +1525,42 @@ function renderNextPageCommand(item, page) {
 	return parts.join(" ");
 }
 
+// Next steps through a Send campaign's life: draft → test → skip-preview →
+// launch → deliveries. Rendered from the returned id, so a clone points at the copy.
+function sendCampaignBreadcrumbs(current, data) {
+	const name = current.tokens.join(" ");
+	if (!name.startsWith("send campaigns ") || !data || typeof data !== "object" || Array.isArray(data) || !data.id) return null;
+	const action = current.tokens.at(-1);
+	const id = quoteArgument(data.id);
+	const run = (verb, extra = "") => `repzo send campaigns ${verb} ${id}${extra}`;
+	if (["create", "update", "clone"].includes(action) || (action === "get" && data.status === "draft"))
+		return [
+			breadcrumb("test", run("test", ` --data '{"identifier":"<email-or-phone>"}'`), "Send yourself a test first"),
+			breadcrumb("skip_preview", run("skip-preview"), "See who would be skipped, and why"),
+			breadcrumb("launch", run("launch"), "Launch the campaign once the test looks right"),
+			action === "get" ? null : breadcrumb("get", run("get"), "Read the campaign"),
+		].filter(Boolean);
+	if (["launch", "resume", "approve"].includes(action)) {
+		if (data.status === "pending_approval")
+			return [
+				breadcrumb("get", run("get"), "Waiting for approval; check its status"),
+				breadcrumb("approve", run("approve"), "Approve it, if you are an approver"),
+			];
+		return [
+			breadcrumb("get", run("get"), "Read the campaign and its stats"),
+			breadcrumb("deliveries", run("deliveries"), "List deliveries"),
+		];
+	}
+	if (["pause", "complete", "archive", "reject"].includes(action))
+		return [breadcrumb("get", run("get"), "Read the campaign")];
+	if (action === "get")
+		return [
+			breadcrumb("deliveries", run("deliveries"), "List deliveries"),
+			breadcrumb("list", "repzo send campaigns list", "Return to the campaign list"),
+		];
+	return null;
+}
+
 function inferBreadcrumbs(data, meta) {
 	const current = OUTPUT_CONTEXT?.item;
 	if (!current) {
@@ -1478,6 +1598,8 @@ function inferBreadcrumbs(data, meta) {
 			breadcrumbs.push(breadcrumb("get", renderCommand(get, record), "Verify the updated record"));
 		}
 	}
+	const campaignCrumbs = sendCampaignBreadcrumbs(current, data);
+	if (campaignCrumbs) return campaignCrumbs;
 	const eventGet = COMMANDS.find((item) => item.tokens.join(" ") === "send events get");
 	if (current.tokens.join(" ") === "send event" && data?.id && eventGet) {
 		breadcrumbs.push(breadcrumb("get", renderCommand(eventGet, data), "Read the recorded event"));
@@ -1543,6 +1665,10 @@ function inferSummary(data) {
 		return `${data.succeeded}/${data.total} records updated; ${data.failed} failed`;
 	if (data?.dryRun) return `${data.method} request previewed; nothing was sent`;
 	const commandName = OUTPUT_CONTEXT?.item?.tokens.join(" ");
+	if (commandName === "send campaigns launch" && data?.status === "pending_approval")
+		return "Campaign is waiting for approval; it sends once an approver approves it";
+	if (commandName?.startsWith("send campaigns ") && data?.id && typeof data.status === "string")
+		return `${OUTPUT_CONTEXT.item.description.replace(/\.$/, "")}: status ${data.status}`;
 	if (commandName === "send events batch" && Array.isArray(data?.results))
 		return `${data.recorded ?? 0} recorded, ${data.duplicates ?? 0} duplicate, ${data.rejected ?? 0} rejected of ${data.results.length} events`;
 	if (commandName === "send event" && typeof data?.duplicate === "boolean")

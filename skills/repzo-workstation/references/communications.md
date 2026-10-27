@@ -50,7 +50,7 @@ Geo-lock or provider restrictions come from the public API; report them without 
 
 ## Repzo Send
 
-Campaign listing and retrieval are reads. Transactional/system dispatch, event recording, event type changes, and opt-out are mutations.
+Campaign listing, retrieval, deliveries, skip previews, audience estimates, brands, and subscription types are reads. Creating, editing, testing, launching, pausing, approving, and archiving campaigns, transactional/system dispatch, event recording, event type changes, and opt-out are mutations.
 
 ```bash
 repzo send campaigns list --limit 50
@@ -61,6 +61,66 @@ repzo send opt-out --data @opt-out.json --dry-run
 ```
 
 Inspect OpenAPI for each strict body.
+
+## Send campaigns
+
+A Send campaign is an email or WhatsApp message sent to an audience, once or continuously. Creating one only saves a draft; nothing goes out until launch. Testing and launching contact real people, so run them only when the user asks.
+
+**1. Find the ids.** Use the ones the user names; never guess.
+
+```bash
+repzo send brands list
+repzo send subscription-types list
+repzo segments list --limit 50
+repzo email-templates list --query 'q=Welcome'
+repzo send event-types list --query 'status=active'
+```
+
+`brandId` is the sender address (unset uses the `isDefault` brand). `subscriptionTypeId` skips contacts who opted out of that type. Marketing and sales sends need `segmentId` or inline `audienceFilters` (segment rule format; `repzo send audience estimate --data '{"audienceFilters":{…}}'` counts matches and needs no `--yes`). Transactional and system sends have no audience. `sendCategory` and `deliveryChannel` can't change after create.
+
+**2. Create the draft.** An event-started welcome email that copies a saved email template:
+
+```json
+{
+  "name": "Welcome email",
+  "sendCategory": "marketing",
+  "deliveryChannel": "email",
+  "emailTemplateId": "TEMPLATE_ID",
+  "payload": { "preheader": "Glad you're here, {{contact.firstName}}" },
+  "segmentId": "SEGMENT_ID",
+  "subscriptionTypeId": "SUBSCRIPTION_TYPE_ID",
+  "brandId": "BRAND_ID",
+  "mode": "continuous",
+  "triggerType": "event",
+  "triggerConfig": { "eventName": "signup_completed", "filters": [{ "property": "plan", "operator": "equals", "value": "pro" }] },
+  "goal": { "event": "plan_upgraded", "ttlDays": 7 }
+}
+```
+
+```bash
+repzo send campaigns create --data @campaign.json --dry-run
+```
+
+`emailTemplateId` copies the template's `subject`, `bodyHtml`, and `designJson` into `payload`; keys you also put in `payload` win. Without a template, the email payload is `{ subject, preheader?, bodyHtml, designJson? }` (`designJson` is the Unlayer design as a JSON string). `{{contact.firstName}}` and, for event-started sends, `{{event.<property>}}` fill per recipient. An event-started send needs `mode: "continuous"`, `triggerType: "event"`, and `triggerConfig.eventName`; `event` with `fixed` returns 422. `send campaigns update` replaces the whole `payload`, so get the campaign first and keep every key.
+
+**3. Test, check, and launch.**
+
+```bash
+repzo send campaigns test CAMPAIGN_ID --data '{"identifier":"you@example.com"}' --dry-run
+repzo send campaigns skip-preview CAMPAIGN_ID
+repzo send campaigns launch CAMPAIGN_ID --dry-run
+```
+
+A test goes to one address (`identifier`) or contact (`contactId`), with `[TEST]` in the subject; it skips caps and subscriptions but not suppressions. `skip-preview` shows how many recipients opt-outs, suppressions, caps, and exclusions would skip. A 422 from launch says what's missing; fix it with `update`. Status `pending_approval` means an approver must run `repzo send campaigns approve CAMPAIGN_ID` (or `reject` with `{"reason":"…"}`).
+
+**4. Follow results.**
+
+```bash
+repzo send campaigns get CAMPAIGN_ID
+repzo send campaigns deliveries CAMPAIGN_ID --query 'status=bounced' --limit 50
+```
+
+`get` returns `stats` (sent, delivered, failed, bounced, openedUnique, clickedUnique, replied, unsubscribed, goalHits, …), refreshed every few minutes. Filter deliveries by `status`, `contactId`, or `engagement=opened|not_opened|clicked|not_clicked`. `pause`, `resume`, `complete`, and `archive` change a running campaign; `clone` copies one into a new draft. `delete` works only for campaigns that never sent; archive the rest.
 
 ## Send events
 
