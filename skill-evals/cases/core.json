@@ -825,5 +825,24 @@
 			"^cli send event --data"
 		],
 		"maxCommands": 6
+	},
+	{
+		"name": "cli-support-change-names-profile",
+		"task": "Rename the customer's contact 6f1c2d3e-0000-4000-8000-000000000001 to Maya Haddad.",
+		"context": "The CLI is available. A support login for the customer is signed in as profile support-acme; the agent's own login is the default profile. The change is authorized.",
+		"tags": [
+			"cli",
+			"write",
+			"support"
+		],
+		"accept": [
+			"contacts update 6f1c2d3e-0000-4000-8000-000000000001 .*--profile support-acme|--profile support-acme .*contacts update 6f1c2d3e-0000-4000-8000-000000000001"
+		],
+		"reject": [
+			"^cli contacts update (?!.*--profile support-acme)",
+			"profiles use support-acme",
+			"--profile default"
+		],
+		"maxCommands": 3
 	}
 ]

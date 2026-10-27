@@ -35,6 +35,8 @@ repzo auth logout --profile support-acme
 
 - The browser asks the agent to pick the customer workspace and the member to act as. Every command runs as that member, with their role and record visibility, and the customer's activity log marks each change as made by support.
 - It always uses its own profile (`--profile` is required), so it never replaces the agent's own login. Pass that `--profile` on every command and never mix it with the agent's own profile in one task.
+- While a support login is live, the CLI refuses any change that doesn't name its profile, and it can't become the default profile. Never work around that refusal by guessing: pass `--profile support-…` when the change is for the customer, or the agent's own profile only when the user clearly asked for a change in their own workspace. If unsure which, ask.
+- Each command prints its target on stderr, for example `→ Acme Trading · SUPPORT · acting as sara@acme.com · profile support-acme`, and the response `meta.target` names the same workspace. Check it before and after each change; if it isn't the workspace the user means, stop.
 - It cannot post in team chat or place calls as the member.
 - It ends after 8 hours, or immediately when the customer turns support access off, the agent leaves the support roster, or the member loses access. A request then fails with "This support login has ended": stop and tell the user. Don't try to get back in another way.
 - Use it only for the support request the user is working on. Log out when done.

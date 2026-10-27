@@ -169,6 +169,10 @@ let OUTPUT_OPTIONS = {
 };
 let OUTPUT_POSITIONALS = [];
 let OUTPUT_CONTEXT = null;
+// Where the current command runs (workspace + member), echoed in the output so
+// a support login can't be mistaken for the agent's own.
+let OUTPUT_TARGET = null;
+let TARGET_ANNOUNCED = false;
 const RESPONSE_META = new WeakMap();
 
 const CRUD_RESOURCES = [
@@ -1318,7 +1322,7 @@ Common options:
   --agent --help          Return machine-readable help
 
 REPZO_TOKEN and REPZO_BASE_URL override the selected profile. Browser login is the default; use --token-stdin for a Developer App key or CI. Tokens are never accepted as argv values.
-Support agents: --support signs a separate profile in to a customer workspace that allows support access, acting as a member you pick in the browser. It ends after 8 hours or when the customer turns support access off.`;
+Support agents: --support signs a separate profile in to a customer workspace that allows support access, acting as a member you pick in the browser. It ends after 8 hours or when the customer turns support access off. While it's live, changes must name --profile, and each command prints the workspace and member it runs as.`;
 
 function writeJson(stream, value, compact = OUTPUT_OPTIONS.compact) {
 	stream.write(`${JSON.stringify(value, null, compact ? 0 : 2)}\n`);
@@ -1570,7 +1574,12 @@ function json(value, compact = OUTPUT_OPTIONS.compact, presentation = {}) {
 			data,
 			summary: presentation.summary || inferSummary(data),
 			breadcrumbs: presentation.breadcrumbs || inferBreadcrumbs(data, meta),
-			meta: { ...meta, ...responseMeta, command },
+			meta: {
+				...meta,
+				...responseMeta,
+				command,
+				...(OUTPUT_TARGET ? { target: OUTPUT_TARGET } : {}),
+			},
 		},
 		compact,
 	);
@@ -1819,6 +1828,76 @@ function parseStoredCredential(value) {
 	return { type: "unknown", accessToken: value };
 }
 
+// Who a login acts as, from the token response. Kept on the profile (not with
+// the secret) so every command can name it without reading the keychain.
+function oauthTarget(payload) {
+	if (!payload?.workspace?.id) return undefined;
+	return {
+		workspace: {
+			id: payload.workspace.id,
+			name: payload.workspace.name || null,
+			slug: payload.workspace.slug || null,
+		},
+		actingAs: {
+			id: payload.user?.id || null,
+			email: payload.user?.email || null,
+			name: payload.user?.name || null,
+		},
+		support: payload.support
+			? { expiresAt: payload.support.expires_at || null }
+			: null,
+	};
+}
+
+// A support login stays live until it expires or is signed out (which removes
+// the profile). Logins from before the target was stored have no expiry here.
+function supportLoginLive(value, now = Date.now()) {
+	if (value?.authType !== "support") return false;
+	const expiresAt = value.target?.support?.expiresAt;
+	return !expiresAt || Date.parse(expiresAt) > now;
+}
+
+function liveSupportProfiles(config) {
+	return Object.entries(config.profiles)
+		.filter(([, value]) => supportLoginLive(value))
+		.map(([name]) => name);
+}
+
+function targetSummary(name, value) {
+	const target = value?.target;
+	return {
+		profile: name,
+		workspace: target?.workspace?.name || target?.workspace?.slug || null,
+		actingAs: target?.actingAs?.email || target?.actingAs?.name || null,
+		support: value?.authType === "support",
+		...(target?.support?.expiresAt
+			? { supportEndsAt: target.support.expiresAt }
+			: {}),
+	};
+}
+
+function targetLine(summary) {
+	const parts = [summary.workspace || `profile ${summary.profile}`];
+	if (summary.support) {
+		parts.push("SUPPORT", `acting as ${summary.actingAs || "the member you picked"}`);
+	} else parts.push(summary.actingAs ? `you (${summary.actingAs})` : "you");
+	if (summary.workspace) parts.push(`profile ${summary.profile}`);
+	if (summary.supportEndsAt)
+		parts.push(`ends ${new Date(summary.supportEndsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
+	return `→ ${parts.join(" · ")}`;
+}
+
+async function forgetSupportProfile(config, name) {
+	await deleteCredential(name);
+	delete config.profiles[name];
+	if (config.defaultProfile === name)
+		config.defaultProfile =
+			Object.keys(config.profiles).find(
+				(other) => config.profiles[other].authType !== "support",
+			) || "default";
+	await saveProfiles(config);
+}
+
 function serializeOAuthCredential(payload) {
 	return JSON.stringify({
 		version: 1,
@@ -1860,12 +1939,33 @@ async function postOAuth(origin, path, values) {
 
 async function refreshOAuthCredential(profile, origin, credential) {
 	if (!credential.refreshToken) return credential.accessToken;
-	const payload = await postOAuth(origin, "/api/v1/oauth/token", {
-		grant_type: "refresh_token",
-		refresh_token: credential.refreshToken,
-		client_id: CLI_OAUTH_CLIENT_ID,
-	});
+	const config = await loadProfiles();
+	let payload;
+	try {
+		payload = await postOAuth(origin, "/api/v1/oauth/token", {
+			grant_type: "refresh_token",
+			refresh_token: credential.refreshToken,
+			client_id: CLI_OAUTH_CLIENT_ID,
+		});
+	} catch (error) {
+		// An ended support login must stop counting as live, or every later
+		// write without --profile would keep asking about it.
+		if (error instanceof CliFailure && config.profiles[profile]?.authType === "support") {
+			await forgetSupportProfile(config, profile);
+			fail(error.payload.error.message, {
+				code: "auth",
+				exitCode: EXIT_CODES.auth,
+				hint: `Support login '${profile}' ended and was removed. Run repzo auth login --support --profile ${profile} to start a new one.`,
+			});
+		}
+		throw error;
+	}
 	await setCredential(profile, serializeOAuthCredential(payload));
+	const target = oauthTarget(payload);
+	if (target && config.profiles[profile]) {
+		config.profiles[profile].target = target;
+		await saveProfiles(config);
+	}
 	return payload.access_token;
 }
 
@@ -2038,6 +2138,7 @@ async function handleAuth(positionals, options) {
 		let storedCredential;
 		let authType;
 		let scopes;
+		let target;
 		if (options.support && (options["token-stdin"] || !options.profile))
 			fail("Support login needs its own profile and browser login.", {
 				code: "usage",
@@ -2061,6 +2162,7 @@ async function handleAuth(positionals, options) {
 			});
 			storedCredential = serializeOAuthCredential(payload);
 			authType = options.support ? "support" : "browser";
+			target = oauthTarget(payload);
 			scopes = String(payload.scope || "")
 				.split(/\s+/)
 				.filter(Boolean);
@@ -2070,18 +2172,25 @@ async function handleAuth(positionals, options) {
 			baseUrl,
 			credential: backend === "macOS Keychain" ? "keychain" : "file",
 			authType,
+			...(target ? { target } : {}),
 		};
-		if (!config.defaultProfile) config.defaultProfile = profile;
+		// A support login is only ever used when named with --profile.
+		if (!config.defaultProfile && authType !== "support")
+			config.defaultProfile = profile;
 		await saveProfiles(config);
+		const summary = targetSummary(profile, config.profiles[profile]);
 		json({
 			ok: true,
 			profile,
 			baseUrl,
 			authType,
 			credentialStore: backend,
+			...(target ? { workspace: summary.workspace, actingAs: summary.actingAs } : {}),
 			...(scopes ? { scopes } : {}),
 			...(authType === "support"
-				? { note: "Acting as the member you picked. This login ends after 8 hours or when the customer turns support access off." }
+				? {
+						note: `Acting as ${summary.actingAs || "the member you picked"}${summary.workspace ? ` in ${summary.workspace}` : ""}. Pass --profile ${profile} on every command for this customer; changes without --profile are refused while this login is live. It ends after 8 hours or when the customer turns support access off.`,
+					}
 				: {}),
 		});
 		return;
@@ -2099,7 +2208,9 @@ async function handleAuth(positionals, options) {
 				client_id: CLI_OAUTH_CLIENT_ID,
 			}).catch(() => {});
 		}
-		await deleteCredential(profile);
+		if (config.profiles[profile]?.authType === "support")
+			await forgetSupportProfile(config, profile);
+		else await deleteCredential(profile);
 		json({ ok: true, profile });
 		return;
 	}
@@ -2119,6 +2230,11 @@ async function handleAuth(positionals, options) {
 				: credential?.type || null,
 			...(!process.env.REPZO_TOKEN && config.profiles[profile]?.authType === "support"
 				? { support: true }
+				: {}),
+			...(!process.env.REPZO_TOKEN && config.profiles[profile]?.target
+				? (({ workspace, actingAs, supportEndsAt }) => ({ workspace, actingAs, ...(supportEndsAt ? { supportEndsAt } : {}) }))(
+						targetSummary(profile, config.profiles[profile]),
+					)
 				: {}),
 			...(credential?.type === "oauth"
 				? {
@@ -2150,6 +2266,10 @@ async function handleProfiles(positionals, options) {
 				baseUrl: value.baseUrl,
 				credential: value.credential,
 				active: name === config.defaultProfile,
+				...(value.target ? (({ workspace, actingAs }) => ({ workspace, actingAs }))(targetSummary(name, value)) : {}),
+				...(value.authType === "support"
+					? { support: true, live: supportLoginLive(value) }
+					: {}),
 			})),
 		});
 		return;
@@ -2162,6 +2282,12 @@ async function handleProfiles(positionals, options) {
 				code: "not_found",
 				exitCode: EXIT_CODES.not_found,
 				hint: "Run repzo profiles list to see configured profiles.",
+			});
+		if (config.profiles[name].authType === "support")
+			fail(`'${name}' is a support login and can't be the default profile.`, {
+				code: "usage",
+				exitCode: EXIT_CODES.usage,
+				hint: `Pass --profile ${name} on each command for this customer, so nothing reaches their workspace by accident.`,
 			});
 		config.defaultProfile = name;
 		await saveProfiles(config);
@@ -2401,9 +2527,10 @@ function completion(shell) {
 	fail("Usage: repzo completion <bash|zsh|fish>");
 }
 
-async function resolveProfile(options) {
+async function resolveProfile(options, { mutating = false } = {}) {
 	const config = await loadProfiles();
 	const profile = String(options.profile || config.defaultProfile || "default");
+	if (!process.env.REPZO_TOKEN) guardSupportTarget(config, profile, options, mutating);
 	const origin = String(
 		options["base-url"] ||
 			process.env.REPZO_BASE_URL ||
@@ -2427,6 +2554,40 @@ async function resolveProfile(options) {
 		apiRoot: origin.endsWith("/api/v1") ? origin : `${origin}/api/v1`,
 		token,
 	};
+}
+
+// While a support login is live, the CLI never guesses between it and the
+// agent's own login: a change must name its profile, and every command says
+// which workspace and member it runs as.
+function guardSupportTarget(config, profile, options, mutating) {
+	const live = liveSupportProfiles(config);
+	const value = config.profiles[profile];
+	if (!options.profile && value?.authType === "support")
+		fail(`The default profile '${profile}' is a support login.`, {
+			code: "usage",
+			exitCode: EXIT_CODES.usage,
+			hint: `Pass --profile ${profile} for the customer, or run repzo profiles use <your-profile> to pick your own login as the default.`,
+		});
+	if (!options.profile && mutating && live.length) {
+		const logins = live
+			.map((name) => {
+				const summary = targetSummary(name, config.profiles[name]);
+				return `${name}${summary.workspace ? ` (${summary.workspace}${summary.actingAs ? `, acting as ${summary.actingAs}` : ""})` : ""}`;
+			})
+			.join(", ");
+		fail(`You have a live support login: ${logins}. Say which login this change is for.`, {
+			code: "usage",
+			exitCode: EXIT_CODES.usage,
+			hint: `Add --profile ${live[0]} for the customer, or --profile ${profile} for your own workspace. Done with the customer? Run repzo auth logout --profile ${live[0]}.`,
+			details: { liveSupportProfiles: live, defaultProfile: profile },
+		});
+	}
+	if (value?.target || value?.authType === "support")
+		OUTPUT_TARGET = targetSummary(profile, value);
+	if ((live.length || value?.authType === "support") && !TARGET_ANNOUNCED) {
+		TARGET_ANNOUNCED = true;
+		process.stderr.write(`${targetLine(targetSummary(profile, value))}\n`);
+	}
 }
 
 async function fetchWithRetry(url, init, options = {}) {
@@ -2532,7 +2693,8 @@ function normalizeRecordEtag(etag) {
 }
 
 async function runApi(method, path, body, options, pagination, mutation) {
-	const profile = await resolveProfile(options);
+	const mutating = mutation ?? !["GET", "HEAD", "OPTIONS"].includes(method);
+	const profile = await resolveProfile(options, { mutating });
 	const publicDocs = path === "/openapi.json";
 	const url = new URL(
 		`${profile.apiRoot}${path.startsWith("/") ? path : `/${path}`}`,
@@ -2545,7 +2707,6 @@ async function runApi(method, path, body, options, pagination, mutation) {
 	for (const name of ["page", "limit", "cursor", "q"])
 		if (options[name] !== undefined)
 			url.searchParams.set(name, String(options[name]));
-	const mutating = mutation ?? !["GET", "HEAD", "OPTIONS"].includes(method);
 	const ifMatch = options["if-match"]?.split(",").map(normalizeRecordEtag).join(", ");
 	if (options["idempotency-key"] && !/^[A-Za-z0-9._:-]{1,255}$/.test(options["idempotency-key"]))
 		fail("--idempotency-key must be 1-255 characters using letters, numbers, '.', '_', ':', or '-'.");
@@ -2683,7 +2844,7 @@ async function runFileUpload(path, filePath, options) {
 	if (!info.isFile()) fail("Upload path must point to a regular file.");
 	const contents = await readFile(filePath);
 	const contentSha256 = crypto.createHash("sha256").update(contents).digest("hex");
-	const profile = await resolveProfile(options);
+	const profile = await resolveProfile(options, { mutating: true });
 	if (options["idempotency-key"] && !/^[A-Za-z0-9._:-]{1,255}$/.test(options["idempotency-key"]))
 		fail("--idempotency-key must be 1-255 characters using letters, numbers, '.', '_', ':', or '-'.");
 	const url = new URL(`${profile.apiRoot}${path}`);
@@ -3291,7 +3452,10 @@ try {
 						},
 						EXIT_CODES.api,
 					);
-		writeJson(process.stderr, failure.payload);
+		writeJson(
+			process.stderr,
+			OUTPUT_TARGET ? { ...failure.payload, target: OUTPUT_TARGET } : failure.payload,
+		);
 		process.exitCode = failure.exitCode;
 	}
 }

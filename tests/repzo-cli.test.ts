@@ -15,6 +15,9 @@ import express from "express";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const packageVersion = JSON.parse(await readFile("package.json", "utf8")).version;
+// Never read the developer's own logins: a live support login there changes
+// what the CLI allows.
+const isolatedConfigDir = await mkdtemp(join(tmpdir(), "repzo-cli-config-"));
 
 async function runCli(
 	args: string[],
@@ -31,6 +34,7 @@ async function runCli(
 						...process.env,
 						REPZO_DISABLE_SKILL_REFRESH: "1",
 						REPZO_CREDENTIAL_BACKEND: "file",
+						REPZO_CONFIG_DIR: isolatedConfigDir,
 						...options.env,
 					},
 					stdio: "pipe",
@@ -735,7 +739,7 @@ describe("Repzo CLI v2", () => {
 		});
 	});
 
-	it("signs a separate profile in for support and refuses to replace the default one", async () => {
+	it("signs a separate profile in for support and never mixes it up with the agent's own login", async () => {
 		const configDir = await mkdtemp(join(tmpdir(), "repzo-cli-support-"));
 		const env = {
 			...process.env,
@@ -749,15 +753,28 @@ describe("Repzo CLI v2", () => {
 
 		const app = express();
 		app.use(express.urlencoded({ extended: false }));
+		const supportEndsAt = new Date(Date.now() + 8 * 3600 * 1000).toISOString();
 		app.post("/api/v1/oauth/token", (_req, res) =>
 			res.json({
 				access_token: "foxu-support-access",
 				token_type: "Bearer",
 				expires_in: 3600,
 				refresh_token: "foxr-support-refresh",
-				scope: "contacts:read",
+				scope: "contacts:read contacts:write",
+				workspace: { id: "org-acme", name: "Acme Trading", slug: "acme" },
+				user: { id: "user-sara", email: "sara@acme.test", name: "Sara Haddad" },
+				support: { expires_at: supportEndsAt },
 			}),
 		);
+		app.post("/api/v1/oauth/revoke", (_req, res) => res.status(200).end());
+		const requests: string[] = [];
+		app.use(express.json());
+		app.all("/api/v1/contacts", (req, res) => {
+			requests.push(`${req.method} ${req.headers.authorization}`);
+			res.status(req.method === "POST" ? 201 : 200).json(
+				req.method === "POST" ? { id: "contact-1" } : { data: [], meta: { page: 1, limit: 20, total: 0 } },
+			);
+		});
 		const authServer = await new Promise<Server>((resolve) => {
 			const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
 		});
@@ -795,13 +812,112 @@ describe("Repzo CLI v2", () => {
 			child.on("error", reject);
 			child.on("close", (code) => resolve({ code: code ?? 1, stdout }));
 		});
-		await new Promise<void>((resolve) => authServer.close(() => resolve()));
 
 		expect(result.code).toBe(0);
 		expect(supportParam).toBe("1");
-		expect(JSON.parse(result.stdout).data).toMatchObject({ profile: "support-acme", authType: "support" });
+		expect(JSON.parse(result.stdout).data).toMatchObject({
+			profile: "support-acme",
+			authType: "support",
+			workspace: "Acme Trading",
+			actingAs: "sara@acme.test",
+		});
 		const status = await runCli(["auth", "status", "--profile", "support-acme"], { env });
-		expect(JSON.parse(status.stdout).data).toMatchObject({ profile: "support-acme", support: true });
+		expect(JSON.parse(status.stdout).data).toMatchObject({
+			profile: "support-acme",
+			support: true,
+			workspace: "Acme Trading",
+			actingAs: "sara@acme.test",
+			supportEndsAt,
+		});
+
+		// The agent's own login stays the default.
+		const profiles = JSON.parse(await readFile(join(configDir, "profiles.json"), "utf8"));
+		expect(profiles.defaultProfile).toBe("default");
+		profiles.profiles.default = { baseUrl: origin, credential: "file", authType: "developer_app" };
+		await writeFile(join(configDir, "profiles.json"), JSON.stringify(profiles));
+		const secrets = JSON.parse(await readFile(join(configDir, "credentials.json"), "utf8"));
+		await writeFile(join(configDir, "credentials.json"), JSON.stringify({ ...secrets, default: "foxa-own-key" }));
+
+		const makeDefault = await runCli(["profiles", "use", "support-acme"], { env });
+		expect(makeDefault.code).toBe(1);
+		expect(JSON.parse(makeDefault.stderr).error.message).toContain("can't be the default");
+
+		// A change without --profile is refused while the support login is live.
+		const create = ["contacts", "create", "--data", '{"firstName":"Maya"}', "--yes"];
+		const unnamed = await runCli(create, { env });
+		expect(unnamed.code).toBe(1);
+		expect(unnamed.stderr).toContain("live support login: support-acme (Acme Trading, acting as sara@acme.test)");
+		expect(unnamed.stderr).toContain("--profile support-acme");
+		expect(requests).toEqual([]);
+
+		const asSupport = await runCli([...create, "--profile", "support-acme"], { env });
+		expect(asSupport.code, asSupport.stderr).toBe(0);
+		expect(asSupport.stderr).toContain("→ Acme Trading · SUPPORT · acting as sara@acme.test · profile support-acme");
+		expect(JSON.parse(asSupport.stdout).meta.target).toMatchObject({ profile: "support-acme", workspace: "Acme Trading", support: true });
+
+		const asSelf = await runCli([...create, "--profile", "default"], { env });
+		expect(asSelf.code).toBe(0);
+		expect(asSelf.stderr).toContain("→ profile default · you");
+
+		// Reads still run on the default, labelled so the agent sees where.
+		const read = await runCli(["contacts", "list"], { env });
+		expect(read.code).toBe(0);
+		expect(read.stderr).toContain("→ profile default · you");
+		expect(requests).toEqual([
+			"POST Bearer foxu-support-access",
+			"POST Bearer foxa-own-key",
+			"GET Bearer foxa-own-key",
+		]);
+
+		// Signing out removes the support login, and the guard goes with it.
+		expect((await runCli(["auth", "logout", "--profile", "support-acme"], { env })).code).toBe(0);
+		const afterLogout = await runCli(create, { env });
+		expect(afterLogout.code).toBe(0);
+		expect(afterLogout.stderr).toBe("");
+		expect(JSON.parse(await readFile(join(configDir, "profiles.json"), "utf8")).profiles["support-acme"]).toBeUndefined();
+		await new Promise<void>((resolve) => authServer.close(() => resolve()));
+	});
+
+	it("removes a support login that has ended so it stops guarding changes", async () => {
+		const configDir = await mkdtemp(join(tmpdir(), "repzo-cli-support-ended-"));
+		const app = express();
+		app.use(express.urlencoded({ extended: false }));
+		app.post("/api/v1/oauth/token", (_req, res) =>
+			res.status(400).json({ error: "invalid_grant", error_description: "This support login has ended." }),
+		);
+		const server = await new Promise<Server>((resolve) => {
+			const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+		});
+		const address = server.address();
+		if (!address || typeof address === "string") throw new Error("Expected test address");
+		const origin = `http://127.0.0.1:${address.port}`;
+		await writeFile(join(configDir, "profiles.json"), JSON.stringify({
+			defaultProfile: "default",
+			profiles: {
+				default: { baseUrl: origin, credential: "file", authType: "developer_app" },
+				"support-acme": { baseUrl: origin, credential: "file", authType: "support" },
+			},
+		}));
+		await writeFile(join(configDir, "credentials.json"), JSON.stringify({
+			default: "foxa-own-key",
+			"support-acme": JSON.stringify({ version: 1, type: "oauth", accessToken: "foxu-old", refreshToken: "foxr-old", expiresAt: 0, scopes: [] }),
+		}));
+		const env = { REPZO_CONFIG_DIR: configDir };
+
+		const blocked = await runCli(["contacts", "create", "--data", "{}", "--dry-run"], { env });
+		expect(blocked.code).toBe(1);
+		expect(blocked.stderr).toContain("repzo auth logout --profile support-acme");
+
+		const ended = await runCli(["contacts", "list", "--profile", "support-acme"], { env });
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+		expect(ended.code).toBe(3);
+		expect(ended.stderr).toContain("This support login has ended.");
+		expect(ended.stderr).toContain("ended and was removed");
+		const profiles = JSON.parse(await readFile(join(configDir, "profiles.json"), "utf8"));
+		expect(profiles.profiles["support-acme"]).toBeUndefined();
+
+		const allowed = await runCli(["contacts", "create", "--data", "{}", "--dry-run"], { env });
+		expect(allowed.code).toBe(0);
 	});
 
 	it("normalizes an API-root base URL during browser OAuth", async () => {
