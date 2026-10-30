@@ -1189,6 +1189,7 @@ command(["agents", "functions", "update"], "PATCH", "/agents/{id}/functions/{nam
 	gotchas: [
 		"Body: { enabled: boolean, config?: { instructions? (≤2000 chars), bindings?, whatsappFlows? } }.",
 		"bindings: { FIELD_KEY: { source: \"agent\", instructions? } | { source: \"fixed\", value } | { source: \"variable\", variable } }. Get field keys from agents functions get.",
+		"upsert_contact can move the chat's contact to a contact-pipeline stage (stageId, plus pipelineId for another contact pipeline) and set its owner (ownerUserId, an active member). Take both IDs from the field options of agents functions get. It never moves a contact back to an earlier stage of the same pipeline (the result says skipped) unless the stageId binding adds allowBackward: true; allowBackward is rejected on any other field.",
 		"send_whatsapp_flow needs config.whatsappFlows: [{ flowId, instructions? }] with 1–20 published Flows from agents whatsapp-flows; it is chat (WhatsApp) only.",
 		"Disabling a function still used by a Playbook flow or procedure returns 409: edit the Playbook or procedure first (see usedIn).",
 		"Changes the draft; publish to make it live.",
