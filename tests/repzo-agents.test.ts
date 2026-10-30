@@ -134,6 +134,7 @@ describe("AI-agent commands", () => {
 		expect(gotchas("agents functions update")).toMatch(/409/);
 		expect(gotchas("agents functions update")).toContain("whatsappFlows");
 		expect(gotchas("agents functions update")).toContain("agents whatsapp-flows");
+		expect(gotchas("agents functions update")).toContain("allowBackward");
 		expect(gotchas("agents tools")).toContain("allowed: true");
 		expect(gotchas("agents tools")).toMatch(/Helper tools .* cannot be enabled on their own/);
 		expect(gotchas("agents playbook validate")).toContain("Saving also allows the agent to use X");

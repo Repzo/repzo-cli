@@ -71,6 +71,7 @@ The update body is `{ "enabled": true|false, "config": { "instructions", "bindin
   - `{ "source": "agent" }` — the AI fills it in from the conversation. Add `"instructions"` to guide it ("Use the branch the customer named; ask if unclear").
   - `{ "source": "fixed", "value": … }` — always this value. Use for things like a fixed pipeline, owner, or status. Copy real IDs from metadata; never guess.
   - `{ "source": "variable", "variable": "contact.phone" }` — taken from a Playbook variable path.
+  - `"allowBackward": true` can be added to the `stageId` binding of `upsert_contact` only (see below). Any other field returns `422`.
 - `whatsappFlows` (only for `send_whatsapp_flow`, required there): 1–20 published Flows as `[{ "flowId": "…", "instructions": "When to send this Flow" }]`. Get IDs from `repzo agents whatsapp-flows AGENT_ID --json` and use only those with `available: true`.
 
 Example file `function-update.json`:
@@ -94,6 +95,34 @@ repzo agents functions update AGENT_ID create_appointment --data @function-updat
 repzo agents functions update AGENT_ID create_appointment --data @function-update.json --yes
 repzo agents functions get AGENT_ID create_appointment --json
 ```
+
+### Contact stage and owner (`upsert_contact`)
+
+`upsert_contact` (Create or Update Contact) can move the conversation's own contact to a stage and set who owns it. It never takes a contact id; it always acts on the contact linked to the chat (or the one it creates and links).
+
+- `stageId`: a stage of one of the workspace's **contact** pipelines. Add `pipelineId` only when the stage is in a different contact pipeline than the contact's current one. Take IDs from the `options` of the `stageId` and `pipelineId` fields in `repzo agents functions get AGENT_ID upsert_contact --json`; never guess them.
+- `ownerUserId`: a `user_reference` field. It must be an active member of the workspace; its `options` list the members.
+- A stage from another pipeline type, another workspace, or an inactive owner makes the call fail with a clear error and nothing is saved.
+- The contact is never moved back to an earlier stage of the same pipeline (for example Customer back to MQL). The call still saves the other details and its result says `skipped: contact already at <stage>`. Add `"allowBackward": true` to the `stageId` binding only if the workspace really wants backward moves.
+- An owner is never cleared. An existing owner changes only when the call gives an owner.
+- The write goes through the normal contact update, so the agent's user needs `contacts.update` (or `contacts.update_own` on a contact it owns), and the audit log, workflows and webhooks (`contact.stage_changed`, `contact.owner_changed`) fire as usual.
+
+Typical setup: a fixed stage, and the owner chosen by the agent from its instructions.
+
+```json
+{
+  "enabled": true,
+  "config": {
+    "instructions": "Save the contact after the customer books a meeting.",
+    "bindings": {
+      "stageId": { "source": "fixed", "value": "STAGE_ID" },
+      "ownerUserId": { "source": "agent", "instructions": "SFA leads go to USER_A; Workstation leads go to USER_B." }
+    }
+  }
+}
+```
+
+In `repzo agents test` conversations the call is simulated: its result reports the stage and owner it would set (or that the stage would be skipped) without changing the contact.
 
 Rules:
 
