@@ -2,7 +2,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import crypto from "node:crypto";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, createReadStream, createWriteStream } from "node:fs";
 import {
 	access,
 	chmod,
@@ -19,6 +19,8 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import http from "node:http";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -145,6 +147,11 @@ const GLOBAL_FLAGS = Object.freeze([
 		name: "--no-retry",
 		type: "boolean",
 		description: "Disable transient request retries.",
+	},
+	{
+		name: "--output",
+		type: "string",
+		description: "Where a download command saves the file.",
 	},
 ]);
 
@@ -1165,6 +1172,79 @@ command(["ai-visibility", "audits", "run"], "POST", "/ai-visibility/audits", "Ch
 	gotchas: ["Body: { url }. Only pages on your own or a tracked competitor's site. A page that can't be loaded returns a check with status failed."],
 });
 
+const DRIVE_VIEW_GOTCHA = "Returns { folders, files, meta: { limit, truncated } }, up to 200 of each.";
+command(["drive", "recent"], "GET", "/drive/recent", "List your recently changed Drive files.", {
+	gotchas: ["--query limit=1-200, default 50. Only files you own."],
+});
+command(["drive", "starred"], "GET", "/drive/starred", "List the Drive files and folders you starred.", { gotchas: [DRIVE_VIEW_GOTCHA] });
+command(["drive", "shared"], "GET", "/drive/shared", "List Drive files and folders shared with you.", {
+	gotchas: [DRIVE_VIEW_GOTCHA, "Includes folders shared with your department or the whole workspace."],
+});
+command(["drive", "trash"], "GET", "/drive/trash", "List your Drive Trash.", {
+	gotchas: [DRIVE_VIEW_GOTCHA, "Trash empties itself after 30 days."],
+});
+command(["drive", "search"], "GET", "/drive/search", "Search your Drive files and folders by name.", {
+	gotchas: ["Pass --query q=TEXT. Only covers what you own: up to 20 folders and 40 files. Browse what others shared with drive shared."],
+});
+command(["drive", "unshare"], "DELETE", "/drive/shares/{id}", "Stop sharing a Drive file or folder.", {
+	args: ["id"],
+	gotchas: ["The share ID comes from drive folders shares or drive files shares. Only the owner can remove it."],
+});
+const DRIVE_SHARE_GOTCHAS = (permission) => [
+	`Body: exactly one of { sharedWithUserId } (repzo metadata users), { sharedWithDepartmentId } (repzo metadata departments), or { sharedWithEmail }${permission}. Only the owner can share.`,
+	"sharedWithEmail emails that person a link that opens it without an account, which sends real email outside the workspace: confirm the address with the user first. Each call sends a new invite.",
+];
+for (const [resource, label, bodyGotchas] of [
+	["folders", "folder", ["Body: any of { name, parentId, color, icon, visibility: private|shared|org }. parentId moves it (null = top level). null clears color or icon.", "visibility org lets everyone in the workspace view it and everything inside: confirm with the user first. Only the owner can change a folder."]],
+	["files", "file", ["Body: any of { name, parentId }. parentId moves it (null = top level). Only the owner can change a file."]],
+]) {
+	const path = `/drive/${resource}`;
+	command(["drive", resource, "list"], "GET", path, `List Drive ${label}s in a folder, or your own at the top level.`, {
+		pagination: "offset",
+		gotchas: ["--query parentId=FOLDER_ID lists a folder you can see, including what others added. Without it, your own top-level items."],
+	});
+	command(["drive", resource, "get"], "GET", `${path}/{id}`, `Get a Drive ${label}.`, {
+		args: ["id"],
+		...(resource === "folders" ? { gotchas: ["Includes path, from the top level down to this folder."] } : {}),
+	});
+	command(["drive", resource, "update"], "PATCH", `${path}/{id}`, `Rename or move a Drive ${label}.`, { args: ["id"], body: true, gotchas: bodyGotchas });
+	command(["drive", resource, "trash"], "POST", `${path}/{id}/trash`, `Move a Drive ${label} to Trash.`, {
+		args: ["id"],
+		gotchas: ["No body. Undo with restore. Only the owner can."],
+	});
+	command(["drive", resource, "restore"], "POST", `${path}/{id}/restore`, `Restore a Drive ${label} from Trash.`, { args: ["id"] });
+	command(["drive", resource, "delete"], "DELETE", `${path}/{id}`, `Delete a Drive ${label} forever.`, {
+		args: ["id"],
+		gotchas: ["It must be in Trash first (409 otherwise). This can't be undone: use trash unless the user asked to delete it forever."],
+	});
+	command(["drive", resource, "star"], "PUT", `${path}/{id}/star`, `Star a Drive ${label}.`, { args: ["id"], gotchas: ["Safe to repeat."] });
+	command(["drive", resource, "unstar"], "DELETE", `${path}/{id}/star`, `Remove a Drive ${label}'s star.`, { args: ["id"], gotchas: ["Safe to repeat."] });
+	command(["drive", resource, "shares"], "GET", `${path}/{id}/shares`, `List who a Drive ${label} is shared with.`, {
+		args: ["id"],
+		gotchas: ["Only the owner can."],
+	});
+	command(["drive", resource, "share"], "POST", `${path}/{id}/shares`, `Share a Drive ${label}.`, {
+		args: ["id"],
+		body: true,
+		gotchas: DRIVE_SHARE_GOTCHAS(resource === "folders" ? ", plus permission?: view|edit (edit lets them manage its contents). Sharing again with the same person or department changes their access" : "; files are always view-only"),
+	});
+}
+command(["drive", "folders", "create"], "POST", "/drive/folders", "Create a Drive folder.", {
+	body: true,
+	gotchas: ["Body: { name, parentId?, color?, icon?, visibility?: private|shared|org }. Default visibility is private. Inside someone else's folder you need edit access."],
+});
+command(["drive", "files", "upload"], "POST", "/drive/files", "Upload a file to Drive.", {
+	args: ["file"],
+	file: true,
+	directUpload: "/drive/files/direct-uploads",
+	gotchas: ["--query parentId=FOLDER_ID picks the folder; without it the file goes to the top level of your Drive.", "Files over 25 MB go straight to storage automatically. Any file type is allowed."],
+});
+command(["drive", "files", "download"], "GET", "/drive/files/{id}/content", "Download a Drive file to disk.", {
+	args: ["id"],
+	download: true,
+	gotchas: ["--output PATH sets where it goes (a folder keeps the file's name); default is the file's name in the current folder. Refuses to overwrite unless you add --force.", "Files in Trash can't be downloaded; restore them first."],
+});
+
 command(
 	["associations", "list"],
 	"GET",
@@ -1858,6 +1938,7 @@ function parseArgs(argv) {
 		"idempotency-key",
 		"if-match",
 		"limit",
+		"output",
 		"page",
 		"profile",
 		"q",
@@ -2875,8 +2956,16 @@ async function requestJson(url, init, options) {
 			result = { text: raw };
 		}
 	}
-	if (!response.ok) {
-		const status = response.status;
+	if (!response.ok) failApiResponse(response.status, result);
+	const output = result ?? { ok: true, status: response.status };
+	if (output && typeof output === "object") {
+		const etag = response.headers.get("etag");
+		if (etag) RESPONSE_META.set(output, { etag: normalizeRecordEtag(etag) });
+	}
+	return output;
+}
+
+function failApiResponse(status, result) {
 		const error =
 			result && typeof result === "object" && result.error
 				? result.error
@@ -2915,13 +3004,6 @@ async function requestJson(url, init, options) {
 			status,
 			details: error?.details ?? (error ? { code: error.code } : result),
 		});
-	}
-	const output = result ?? { ok: true, status: response.status };
-	if (output && typeof output === "object") {
-		const etag = response.headers.get("etag");
-		if (etag) RESPONSE_META.set(output, { etag: normalizeRecordEtag(etag) });
-	}
-	return output;
 }
 
 // Repzo record validators hash id + updatedAt; proxy compression may add W/
@@ -3072,7 +3154,134 @@ function uploadMimeType(path) {
 	return "application/octet-stream";
 }
 
-async function runFileUpload(path, filePath, options) {
+// Above this the API's multipart limit applies, so the bytes go straight to storage.
+const MULTIPART_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+
+function uploadCredential(profile, options) {
+	if (!profile.token) fail(`No API token for profile '${profile.profile}'. Run repzo auth login --profile ${profile.profile} or set REPZO_TOKEN.`, { code: "auth", exitCode: EXIT_CODES.auth });
+	if (!profile.token.startsWith("foxa-") && !profile.token.startsWith("foxu-")) fail("API token must be a foxa-* Developer API key or foxu-* user access token.", { code: "auth", exitCode: EXIT_CODES.auth });
+	if (!options.yes) fail("Refusing file upload without --yes. Use --dry-run to inspect the request first.");
+}
+
+function appendQuery(url, options) {
+	for (const item of options.query) {
+		const split = item.indexOf("=");
+		if (split < 1) fail(`Invalid --query value: ${item}. Use key=value.`);
+		url.searchParams.append(item.slice(0, split), item.slice(split + 1));
+	}
+}
+
+async function runDirectUpload(directPath, filePath, info, options) {
+	const profile = await resolveProfile(options, { mutating: true });
+	if (options["idempotency-key"] && !/^[A-Za-z0-9._:-]{1,255}$/.test(options["idempotency-key"]))
+		fail("--idempotency-key must be 1-255 characters using letters, numbers, '.', '_', ':', or '-'.");
+	const query = new URL(`${profile.apiRoot}${directPath}`);
+	appendQuery(query, options);
+	const parentId = query.searchParams.get("parentId") || undefined;
+	for (const key of query.searchParams.keys())
+		if (key !== "parentId") fail(`Unknown --query key for this upload: ${key}.`);
+	const url = new URL(`${profile.apiRoot}${directPath}`);
+	const type = uploadMimeType(filePath);
+	const start = { fileName: basename(filePath), contentType: type, size: info.size, ...(parentId ? { parentId } : {}) };
+	if (options["dry-run"]) {
+		json({ dryRun: true, profile: profile.profile, method: "POST", url: url.toString(), directUpload: true, file: { path: resolve(filePath), name: start.fileName, size: info.size, type }, ...(parentId ? { parentId } : {}) }, options.compact);
+		return;
+	}
+	uploadCredential(profile, options);
+	const headers = { Accept: "application/json", Authorization: `Bearer ${profile.token}`, "Content-Type": "application/json" };
+	const target = (await requestJson(url, { method: "POST", headers, body: JSON.stringify(start) }, options)).data;
+	let put;
+	try {
+		put = await fetch(target.uploadUrl, {
+			method: "PUT",
+			headers: { ...target.headers, "Content-Length": String(info.size) },
+			body: Readable.toWeb(createReadStream(filePath)),
+			duplex: "half",
+		});
+	} catch (error) {
+		fail(`Could not upload the file to storage: ${error.message}`, { code: "network", exitCode: EXIT_CODES.network, retryable: true });
+	}
+	if (!put.ok) fail(`Storage refused the upload (HTTP ${put.status}).`, { code: "api", exitCode: EXIT_CODES.api, status: put.status, retryable: put.status >= 500 });
+	json(await requestJson(new URL(`${url}/complete`), {
+		method: "POST",
+		headers: { ...headers, ...(options["idempotency-key"] ? { "Idempotency-Key": options["idempotency-key"] } : {}) },
+		body: JSON.stringify({ uploadToken: target.uploadToken, ...(parentId ? { parentId } : {}) }),
+	}, options), options.compact);
+}
+
+function downloadName(contentDisposition) {
+	const encoded = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition || "")?.[1];
+	let name = "";
+	try {
+		name = encoded ? decodeURIComponent(encoded) : "";
+	} catch {
+		name = "";
+	}
+	// The name comes from the server: never let it pick a folder.
+	name = basename(name.replaceAll("\\", "/")).replaceAll("\0", "");
+	return name && name !== "." && name !== ".." ? name : "download";
+}
+
+async function runFileDownload(path, options) {
+	const profile = await resolveProfile(options);
+	const url = new URL(`${profile.apiRoot}${path}`);
+	if (options["dry-run"]) {
+		json({ dryRun: true, profile: profile.profile, method: "GET", url: url.toString(), ...(options.output ? { output: resolve(options.output) } : {}) }, options.compact);
+		return;
+	}
+	if (!profile.token) fail(`No API token for profile '${profile.profile}'. Run repzo auth login --profile ${profile.profile} or set REPZO_TOKEN.`, { code: "auth", exitCode: EXIT_CODES.auth });
+	let response;
+	try {
+		response = await fetchWithRetry(url, { method: "GET", headers: { Authorization: `Bearer ${profile.token}` } }, { retry: !options["no-retry"] });
+	} catch (error) {
+		fail(`Could not reach ${url.origin}: ${error.message}`, { code: "network", exitCode: EXIT_CODES.network, retryable: true });
+	}
+	if (!response.ok) {
+		const raw = await response.text();
+		let result = null;
+		try {
+			result = raw ? JSON.parse(raw) : null;
+		} catch {
+			result = { text: raw };
+		}
+		failApiResponse(response.status, result);
+	}
+	const name = downloadName(response.headers.get("content-disposition"));
+	const requested = options.output ? resolve(options.output) : resolve(name);
+	const requestedInfo = await stat(requested).catch(() => null);
+	const destination = requestedInfo?.isDirectory() ? join(requested, name) : requested;
+	const existing = requestedInfo?.isDirectory() ? await stat(destination).catch(() => null) : requestedInfo;
+	if (existing && !options.force) {
+		await response.body?.cancel();
+		fail(`${destination} already exists. Pass --force to replace it or --output to choose another path.`);
+	}
+	const temporary = `${destination}.${process.pid}.part`;
+	const hash = crypto.createHash("sha256");
+	let size = 0;
+	try {
+		await pipeline(
+			Readable.fromWeb(response.body),
+			async function* (source) {
+				for await (const chunk of source) {
+					hash.update(chunk);
+					size += chunk.length;
+					yield chunk;
+				}
+			},
+			createWriteStream(temporary, { mode: 0o600 }),
+		);
+		const expected = Number(response.headers.get("content-length"));
+		if (expected && expected !== size) fail(`The download stopped early: got ${size} of ${expected} bytes. Try again.`, { code: "network", exitCode: EXIT_CODES.network, retryable: true });
+		await rename(temporary, destination);
+	} catch (error) {
+		await rm(temporary, { force: true });
+		if (error instanceof CliFailure) throw error;
+		fail(`Could not save the file: ${error.message}`);
+	}
+	json({ path: destination, name, size, type: response.headers.get("content-type"), sha256: hash.digest("hex") }, options.compact);
+}
+
+async function runFileUpload(path, filePath, options, directPath) {
 	let info;
 	try {
 		info = await stat(filePath);
@@ -3080,19 +3289,22 @@ async function runFileUpload(path, filePath, options) {
 		fail(`Could not read upload file: ${error.message}`, { hint: "Pass an existing supported file path." });
 	}
 	if (!info.isFile()) fail("Upload path must point to a regular file.");
+	if (directPath && info.size > MULTIPART_UPLOAD_MAX_BYTES) {
+		await runDirectUpload(directPath, filePath, info, options);
+		return;
+	}
 	const contents = await readFile(filePath);
 	const contentSha256 = crypto.createHash("sha256").update(contents).digest("hex");
 	const profile = await resolveProfile(options, { mutating: true });
 	if (options["idempotency-key"] && !/^[A-Za-z0-9._:-]{1,255}$/.test(options["idempotency-key"]))
 		fail("--idempotency-key must be 1-255 characters using letters, numbers, '.', '_', ':', or '-'.");
 	const url = new URL(`${profile.apiRoot}${path}`);
+	appendQuery(url, options);
 	if (options["dry-run"]) {
 		json({ dryRun: true, profile: profile.profile, method: "POST", url: url.toString(), file: { path: resolve(filePath), name: basename(filePath), size: info.size, type: uploadMimeType(filePath), sha256: contentSha256 }, ...(options["idempotency-key"] ? { idempotencyKey: options["idempotency-key"] } : {}) }, options.compact);
 		return;
 	}
-	if (!profile.token) fail(`No API token for profile '${profile.profile}'. Run repzo auth login --profile ${profile.profile} or set REPZO_TOKEN.`, { code: "auth", exitCode: EXIT_CODES.auth });
-	if (!profile.token.startsWith("foxa-") && !profile.token.startsWith("foxu-")) fail("API token must be a foxa-* Developer API key or foxu-* user access token.", { code: "auth", exitCode: EXIT_CODES.auth });
-	if (!options.yes) fail("Refusing file upload without --yes. Use --dry-run to inspect the request first.");
+	uploadCredential(profile, options);
 	const form = new FormData();
 	form.append("file", new Blob([contents], { type: uploadMimeType(filePath) }), basename(filePath));
 	json(await requestJson(url, { method: "POST", headers: { Accept: "application/json", Authorization: `Bearer ${profile.token}`, "X-Content-SHA256": contentSha256, ...(options["idempotency-key"] ? { "Idempotency-Key": options["idempotency-key"] } : {}) }, body: form }, options), options.compact);
@@ -3653,7 +3865,11 @@ async function main() {
 	OUTPUT_CONTEXT = { item: target, args: commandArgs };
 	if (selected.file) {
 		if (options.data !== undefined) fail("File upload commands take a file path argument, not --data.");
-		await runFileUpload(path, values[selected.fileArg ?? 0], options);
+		await runFileUpload(path, values[selected.fileArg ?? 0], options, selected.directUpload);
+		return;
+	}
+	if (selected.download) {
+		await runFileDownload(path, options);
 		return;
 	}
 	const read = await readBody(options.data);
