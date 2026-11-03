@@ -128,6 +128,23 @@ repzo email-templates clone TEMPLATE_ID --data '{"name":"Welcome (copy)"}' --yes
 
 The server builds HTML only for text, heading, button, divider, image, and html blocks, and rejects other block types with 422. Pass the `meta.etag` from `get` as `--if-match` so an edit made in the editor meanwhile is not overwritten. See the [email templates skill reference](skills/repzo-workstation/references/email-templates.md) for a full design and an HTML example.
 
+## AI Visibility
+
+Work with every tab of Marketing → AI Visibility: read how AI assistants talk about your brand, and manage what's tracked and what to do about it:
+
+```bash
+repzo ai-visibility overview --query from=2026-10-01 --query to=2026-10-31
+repzo ai-visibility citations --query engine=chatgpt
+repzo ai-visibility settings update --data '{"monthlyBudgetUsd":50}' --dry-run
+repzo ai-visibility competitors create --data '{"name":"Zoho","domain":"zoho.com"}' --dry-run
+repzo ai-visibility prompts create --data '{"prompts":[{"text":"Best CRM for clinics in Riyadh","locale":"en"}]}' --dry-run
+repzo ai-visibility prompts update PROMPT_ID --data '{"active":false}' --yes
+repzo ai-visibility recommendations list --query status=active
+repzo ai-visibility recommendations update REC_ID --data @rec-change.json --dry-run
+```
+
+The overview and citations numbers are calculated from tracked answers, so you change them by changing the brand, competitors, and prompts. `prompts suggest`, `prompts translate`, `prompts run`, `recommendations generate`, and `recommendations draft` charge the AI balance. These commands need the `ai_visibility:read` / `ai_visibility:write` scopes, so log in again with `repzo auth login` if you signed in before this version. See the [AI Visibility skill reference](skills/repzo-workstation/references/ai-visibility.md).
+
 ## WhatsApp Flows
 
 Build and edit the in-chat WhatsApp forms (lead capture, surveys, booking, and ordering) on a WhatsApp channel. Start from a ready-made starter, save a draft, and sync it to Meta when it's ready:

@@ -303,6 +303,61 @@ describe("Repzo CLI v2", () => {
 		});
 	});
 
+	it("discovers AI Visibility commands and previews edits", async () => {
+		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
+		for (const [command, method, path, args, mutation, requiresBody] of [
+			["overview", "GET", "/overview", [], false, false],
+			["citations", "GET", "/citations", [], false, false],
+			["referrals", "GET", "/referrals", [], false, false],
+			["settings get", "GET", "/settings", [], false, false],
+			["settings update", "PATCH", "/settings", [], true, true],
+			["competitors list", "GET", "/competitors", [], false, false],
+			["competitors create", "POST", "/competitors", [], true, true],
+			["competitors update", "PATCH", "/competitors/{id}", ["id"], true, true],
+			["competitors delete", "DELETE", "/competitors/{id}", ["id"], true, false],
+			["groups list", "GET", "/groups", [], false, false],
+			["groups create", "POST", "/groups", [], true, true],
+			["groups update", "PATCH", "/groups/{id}", ["id"], true, true],
+			["groups delete", "DELETE", "/groups/{id}", ["id"], true, false],
+			["prompts list", "GET", "/prompts", [], false, false],
+			["prompts get", "GET", "/prompts/{id}", ["id"], false, false],
+			["prompts create", "POST", "/prompts", [], true, true],
+			["prompts update", "PATCH", "/prompts/{id}", ["id"], true, true],
+			["prompts delete", "DELETE", "/prompts/{id}", ["id"], true, false],
+			["prompts suggest", "POST", "/prompts/suggest", [], true, true],
+			["prompts translate", "POST", "/prompts/translate", [], true, true],
+			["prompts run", "POST", "/prompts/run", [], true, true],
+			["recommendations list", "GET", "/recommendations", [], false, false],
+			["recommendations get", "GET", "/recommendations/{id}", ["id"], false, false],
+			["recommendations update", "PATCH", "/recommendations/{id}", ["id"], true, true],
+			["recommendations bulk-update", "POST", "/recommendations/bulk-update", [], true, true],
+			["recommendations generate", "POST", "/recommendations/generate", [], true, false],
+			["recommendations draft", "POST", "/recommendations/{id}/draft", ["id"], true, false],
+			["recommendations save-draft", "POST", "/recommendations/{id}/content-hub", ["id"], true, true],
+			["recommendations create-task", "POST", "/recommendations/{id}/task", ["id"], true, false],
+			["audits list", "GET", "/audits", [], false, false],
+			["audits run", "POST", "/audits", [], true, true],
+		] as const) {
+			expect(catalog).toContainEqual(expect.objectContaining({
+				command: `ai-visibility ${command}`, method, path: `/ai-visibility${path}`, arguments: args, mutation, requiresBody,
+			}));
+		}
+		const generate = catalog.find((entry: { command: string }) => entry.command === "ai-visibility recommendations generate");
+		expect(generate.gotchas.join(" ")).toContain("AI balance");
+
+		const body = { title: "Compare Acme and Zoho", priority: "high" };
+		const preview = await runCli(["ai-visibility", "recommendations", "update", "rec-1", "--data", JSON.stringify(body), "--dry-run"]);
+		expect(preview.code).toBe(0);
+		expect(JSON.parse(preview.stdout).data).toMatchObject({
+			dryRun: true, method: "PATCH", body, url: expect.stringContaining("/api/v1/ai-visibility/recommendations/rec-1"),
+		});
+		const draft = await runCli(["ai-visibility", "recommendations", "draft", "rec-1", "--dry-run"]);
+		expect(draft.code).toBe(0);
+		expect(JSON.parse(draft.stdout).data).toMatchObject({
+			dryRun: true, method: "POST", url: expect.stringContaining("/api/v1/ai-visibility/recommendations/rec-1/draft"),
+		});
+	});
+
 	it("discovers WhatsApp Flow commands and previews edits, syncs, and test sends", async () => {
 		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
 		for (const [command, method, path, args, mutation, requiresBody] of [
