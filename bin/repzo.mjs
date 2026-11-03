@@ -1054,6 +1054,117 @@ command(
 	{ body: true },
 );
 
+const AI_VISIBILITY_RANGE_GOTCHA = "Filter with --query from=YYYY-MM-DD, to=YYYY-MM-DD (default: last 30 days), engine=chatgpt|gemini|perplexity|claude|google_ai, locale=en|ar, groupId=ID.";
+const AI_VISIBILITY_CHARGE_GOTCHA = "Charges the AI balance and counts against a daily limit (429 when spent).";
+command(["ai-visibility", "overview"], "GET", "/ai-visibility/overview", "Get the AI Visibility Overview tab: visibility, sentiment, share of voice, brands, and trends.", {
+	gotchas: [AI_VISIBILITY_RANGE_GOTCHA, "Calculated from tracked answers, so it can't be edited. Change what's tracked with ai-visibility settings update, competitors, and prompts."],
+});
+command(["ai-visibility", "citations"], "GET", "/ai-visibility/citations", "Get the AI Visibility Citations tab: which sites and pages AI assistants cite.", {
+	gotchas: [AI_VISIBILITY_RANGE_GOTCHA, "Calculated from tracked answers, so it can't be edited. Add a source you own to additionalDomains with ai-visibility settings update so future citations count as yours."],
+});
+command(["ai-visibility", "referrals"], "GET", "/ai-visibility/referrals", "Get the visitors, contacts, and deals AI assistants sent.", {
+	gotchas: ["Filter with --query from=YYYY-MM-DD and to=YYYY-MM-DD. Contacts and deals are limited to what you can see."],
+});
+command(["ai-visibility", "settings", "get"], "GET", "/ai-visibility/settings", "Get the tracked brand, competitors, prompt groups, and available options.", {
+	gotchas: ["settings is null until the brand is saved. options lists engines, locales, countries, the price per answer, and the active prompt limit."],
+});
+command(["ai-visibility", "settings", "update"], "PATCH", "/ai-visibility/settings", "Set up or change the tracked brand and tracking.", {
+	body: true,
+	gotchas: [
+		"Body: { brandName, brandAliases?, domain, additionalDomains?, description?, businessType?: b2b|b2c|both, country, engines: [chatgpt|gemini|perplexity|claude|google_ai], locales: [en|ar], trackingEnabled?, monthlyBudgetUsd?, completeSetup? }. The first save needs brandName, domain, country, engines, and locales; after that, fields you omit stay as they are.",
+		"Setup order: save the brand, add prompts, then send { \"completeSetup\": true }. That starts daily tracking, and every answer charges the AI balance (402 when empty).",
+		"Pause with { \"trackingEnabled\": false }; history stays. monthlyBudgetUsd: null removes the limit.",
+	],
+});
+for (const [resource, description] of [
+	["competitors", "competitor"],
+	["groups", "prompt group"],
+]) {
+	const path = `/ai-visibility/${resource}`;
+	const bodyGotchas = resource === "competitors"
+		? ["Body: { name, aliases?, domain? }. Up to 15. Add local spellings as aliases; changes only affect future answers."]
+		: ["Body: { name }. Names are unique. Use the ID as groupId on prompts."];
+	command(["ai-visibility", resource, "list"], "GET", path, `List ${description}s.`);
+	command(["ai-visibility", resource, "create"], "POST", path, `Add a ${description}.`, { body: true, gotchas: bodyGotchas });
+	command(["ai-visibility", resource, "update"], "PATCH", `${path}/{id}`, `Change a ${description}.`, {
+		args: ["id"],
+		body: true,
+		gotchas: resource === "competitors" ? [...bodyGotchas, "Fields you omit stay as they are; domain: null clears it."] : bodyGotchas,
+	});
+	command(["ai-visibility", resource, "delete"], "DELETE", `${path}/{id}`, `Remove a ${description}.`, { args: ["id"] });
+}
+command(["ai-visibility", "prompts", "list"], "GET", "/ai-visibility/prompts", "List tracked prompts with their results for a date range.", {
+	pagination: "offset",
+	gotchas: [`${AI_VISIBILITY_RANGE_GOTCHA} Also q=TEXT and active=true|false.`, "summary covers every matching prompt, not just this page."],
+});
+command(["ai-visibility", "prompts", "get"], "GET", "/ai-visibility/prompts/{id}", "Get a prompt with its trend, brand ranking, and latest full answers.", {
+	args: ["id"],
+	gotchas: ["Filter with --query from=YYYY-MM-DD and to=YYYY-MM-DD."],
+});
+command(["ai-visibility", "prompts", "create"], "POST", "/ai-visibility/prompts", "Add up to 100 prompts to track.", {
+	body: true,
+	gotchas: [
+		"Body: { prompts: [{ text, locale: en|ar, groupId?, stage?: awareness|consideration|evaluation|decision, active?, source?, translationOfId? }] }. Save the brand first (409 otherwise).",
+		"A prompt already tracked in that language is skipped and counted in skipped. Once tracking is on, each active prompt is asked of every engine daily, which charges the AI balance.",
+	],
+});
+command(["ai-visibility", "prompts", "update"], "PATCH", "/ai-visibility/prompts/{id}", "Edit, regroup, pause, or resume a prompt.", {
+	args: ["id"],
+	body: true,
+	gotchas: ["Body: any of { text, locale, groupId, stage, active }. active: false pauses; null clears groupId or stage. New wording applies from the next run; past answers stay."],
+});
+command(["ai-visibility", "prompts", "delete"], "DELETE", "/ai-visibility/prompts/{id}", "Delete a prompt. Its past answers stay in reports.", { args: ["id"] });
+command(["ai-visibility", "prompts", "suggest"], "POST", "/ai-visibility/prompts/suggest", "Suggest prompts with AI from your CRM and inbox questions.", {
+	body: true,
+	gotchas: ["Body: { locale: en|ar, count?: 3-25, useInbox? }.", "Saves nothing: add the ones the user picks with ai-visibility prompts create, keeping each suggestion's source and stage.", AI_VISIBILITY_CHARGE_GOTCHA],
+});
+command(["ai-visibility", "prompts", "translate"], "POST", "/ai-visibility/prompts/translate", "Add the other-language version of prompts with AI.", {
+	body: true,
+	gotchas: ["Body: { promptIds: [1-25 IDs], to: en|ar }. Creates linked prompts.", AI_VISIBILITY_CHARGE_GOTCHA],
+});
+command(["ai-visibility", "prompts", "run"], "POST", "/ai-visibility/prompts/run", "Check prompts now instead of waiting for the daily run.", {
+	body: true,
+	gotchas: ["Body: { promptIds: [1-25 IDs] }. Needs setup finished. Only asks prompts without today's answers; results arrive within minutes, so read them later.", "Charges the AI balance. Limited to 30 a day per workspace (429 when spent)."],
+});
+command(["ai-visibility", "recommendations", "list"], "GET", "/ai-visibility/recommendations", "List recommendations with linked prompts and measured impact.", {
+	gotchas: ["Filter with --query status=open|in_progress|done|dismissed|active (active = open or in progress). Up to 100, highest priority first."],
+});
+command(["ai-visibility", "recommendations", "get"], "GET", "/ai-visibility/recommendations/{id}", "Get a recommendation with its draft.", { args: ["id"] });
+command(["ai-visibility", "recommendations", "update"], "PATCH", "/ai-visibility/recommendations/{id}", "Edit a recommendation's wording, draft, status, or assignee.", {
+	args: ["id"],
+	body: true,
+	gotchas: [
+		"Body: any of { status: open|in_progress|done|dismissed, assigneeUserId, title, description, rationale, priority: high|medium|low, targetUrl, draftTitle, draftMarkdown }. null clears assigneeUserId, rationale, targetUrl, draftTitle, or draftMarkdown.",
+		"Editing an open recommendation moves it to in_progress so the weekly refresh keeps it. Drafts are only for types create_content and update_page.",
+		"status done records today's visibility as the baseline for measuring impact, so only set it when the work is really done.",
+	],
+});
+command(["ai-visibility", "recommendations", "bulk-update"], "POST", "/ai-visibility/recommendations/bulk-update", "Change status or assignee on up to 100 recommendations.", {
+	body: true,
+	gotchas: ["Body: { ids: [1-100 IDs], status?, assigneeUserId? }. Wording can only be edited one at a time."],
+});
+command(["ai-visibility", "recommendations", "generate"], "POST", "/ai-visibility/recommendations/generate", "Generate recommendations from the last four weeks of tracking.", {
+	gotchas: ["No body. Replaces open recommendations nobody touched; anything edited, assigned, in progress, done, dismissed, or with a draft stays. 409 until there's tracking data.", AI_VISIBILITY_CHARGE_GOTCHA],
+});
+command(["ai-visibility", "recommendations", "draft"], "POST", "/ai-visibility/recommendations/{id}/draft", "Write a page draft for a content recommendation with AI.", {
+	args: ["id"],
+	gotchas: ["No body. Replaces any existing draft, including hand edits: read draftMarkdown first. Only for types create_content and update_page.", "Charges the AI balance."],
+});
+command(["ai-visibility", "recommendations", "save-draft"], "POST", "/ai-visibility/recommendations/{id}/content-hub", "Save a recommendation's draft as a Content Hub article.", {
+	args: ["id"],
+	body: true,
+	gotchas: ["Body: { collectionId } from repzo collections list. The article stays a draft in Content Hub. Needs the Content Hub module and permission to create content."],
+});
+command(["ai-visibility", "recommendations", "create-task"], "POST", "/ai-visibility/recommendations/{id}/task", "Turn a recommendation into a task due in a week.", {
+	args: ["id"],
+	gotchas: ['Optional --data \'{ "ownerUserId": "ID" }\'. Defaults to the assignee, then you. Needs permission to create activities.'],
+});
+command(["ai-visibility", "audits", "list"], "GET", "/ai-visibility/audits", "List the latest 50 page checks with how often each page was cited.");
+command(["ai-visibility", "audits", "run"], "POST", "/ai-visibility/audits", "Check a page's AI readiness.", {
+	body: true,
+	gotchas: ["Body: { url }. Only pages on your own or a tracked competitor's site. A page that can't be loaded returns a check with status failed."],
+});
+
 command(
 	["associations", "list"],
 	"GET",
