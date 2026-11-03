@@ -128,6 +128,21 @@ repzo email-templates clone TEMPLATE_ID --data '{"name":"Welcome (copy)"}' --yes
 
 The server builds HTML only for text, heading, button, divider, image, and html blocks, and rejects other block types with 422. Pass the `meta.etag` from `get` as `--if-match` so an edit made in the editor meanwhile is not overwritten. See the [email templates skill reference](skills/repzo-workstation/references/email-templates.md) for a full design and an HTML example.
 
+## Drive
+
+Work with the files and folders in Drive as yourself. You see and change exactly what you can in the web app:
+
+```bash
+repzo drive folders create --data '{"name":"Clients"}' --dry-run
+repzo drive files upload ./contract.pdf --query parentId=FOLDER_ID --yes
+repzo drive files list --query parentId=FOLDER_ID
+repzo drive files download FILE_ID --output ./downloads
+repzo drive folders share FOLDER_ID --data '{"sharedWithUserId":"USER_ID","permission":"edit"}' --dry-run
+repzo drive files trash FILE_ID --yes
+```
+
+Drive needs a browser login (`repzo auth login`), because files belong to people; API keys can't use it. Files over 25 MB go straight to storage automatically. `delete` is permanent and only works on something already in Trash. Sharing with an email address sends a real email with a link that opens the file without an account. See the [Drive skill reference](skills/repzo-workstation/references/drive.md).
+
 ## AI Visibility
 
 Work with every tab of Marketing → AI Visibility: read how AI assistants talk about your brand, and manage what's tracked and what to do about it:

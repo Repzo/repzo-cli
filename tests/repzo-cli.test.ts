@@ -4,8 +4,10 @@ import {
 	lstat,
 	mkdir,
 	mkdtemp,
+	readdir,
 	readFile,
 	realpath,
+	rm,
 	writeFile,
 } from "node:fs/promises";
 import type { Server } from "node:http";
@@ -301,6 +303,178 @@ describe("Repzo CLI v2", () => {
 		expect(JSON.parse(clone.stdout).data).toMatchObject({
 			dryRun: true, method: "POST", url: expect.stringContaining("/api/v1/email-templates/tpl-1/clone"),
 		});
+	});
+
+	it("discovers Drive commands and previews changes", async () => {
+		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
+		const rows: Array<[string, string, string, string[], boolean, boolean]> = [
+			["recent", "GET", "/recent", [], false, false],
+			["starred", "GET", "/starred", [], false, false],
+			["shared", "GET", "/shared", [], false, false],
+			["trash", "GET", "/trash", [], false, false],
+			["search", "GET", "/search", [], false, false],
+			["unshare", "DELETE", "/shares/{id}", ["id"], true, false],
+			["folders create", "POST", "/folders", [], true, true],
+			["files upload", "POST", "/files", ["file"], true, false],
+			["files download", "GET", "/files/{id}/content", ["id"], false, false],
+		];
+		for (const resource of ["folders", "files"]) {
+			rows.push(
+				[`${resource} list`, "GET", `/${resource}`, [], false, false],
+				[`${resource} get`, "GET", `/${resource}/{id}`, ["id"], false, false],
+				[`${resource} update`, "PATCH", `/${resource}/{id}`, ["id"], true, true],
+				[`${resource} delete`, "DELETE", `/${resource}/{id}`, ["id"], true, false],
+				[`${resource} trash`, "POST", `/${resource}/{id}/trash`, ["id"], true, false],
+				[`${resource} restore`, "POST", `/${resource}/{id}/restore`, ["id"], true, false],
+				[`${resource} star`, "PUT", `/${resource}/{id}/star`, ["id"], true, false],
+				[`${resource} unstar`, "DELETE", `/${resource}/{id}/star`, ["id"], true, false],
+				[`${resource} shares`, "GET", `/${resource}/{id}/shares`, ["id"], false, false],
+				[`${resource} share`, "POST", `/${resource}/{id}/shares`, ["id"], true, true],
+			);
+		}
+		for (const [command, method, path, args, mutation, requiresBody] of rows) {
+			expect(catalog).toContainEqual(expect.objectContaining({
+				command: `drive ${command}`, method, path: `/drive${path}`, arguments: args, mutation, requiresBody,
+			}));
+		}
+		const share = catalog.find((entry: { command: string }) => entry.command === "drive folders share");
+		expect(share.gotchas.join(" ")).toContain("sharedWithEmail");
+
+		const preview = await runCli(["drive", "folders", "share", "f-1", "--data", JSON.stringify({ sharedWithUserId: "u-1" }), "--dry-run"]);
+		expect(preview.code).toBe(0);
+		expect(JSON.parse(preview.stdout).data).toMatchObject({
+			dryRun: true, method: "POST", body: { sharedWithUserId: "u-1" }, url: expect.stringContaining("/api/v1/drive/folders/f-1/shares"),
+		});
+		const refused = await runCli(["drive", "files", "delete", "f-1"], { env: { REPZO_TOKEN: "foxu-test-token", REPZO_BASE_URL: "http://127.0.0.1:9" } });
+		expect(refused.code).not.toBe(0);
+		expect(refused.stderr + refused.stdout).toContain("--yes");
+	});
+
+	it("uploads small Drive files as multipart and large ones straight to storage", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "repzo-drive-"));
+		const small = join(dir, "small.txt");
+		const large = join(dir, "large.pdf");
+		const largeSize = 25 * 1024 * 1024 + 1;
+		await writeFile(small, "tiny");
+		await writeFile(large, Buffer.alloc(largeSize, 7));
+
+		const calls: string[] = [];
+		const app = express();
+		let stored = 0;
+		let storedType = "";
+		let storedLength = "";
+		let auth: string | undefined = "unset";
+		app.post("/api/v1/drive/files", (req, res) => {
+			calls.push(`multipart ${req.url} ${String(req.headers["content-type"]).split(";")[0]}`);
+			req.resume();
+			req.on("end", () => res.status(201).json({ id: "file-small" }));
+		});
+		app.post("/api/v1/drive/files/direct-uploads", express.json(), (req, res) => {
+			calls.push(`request ${JSON.stringify(req.body)}`);
+			res.json({ data: {
+				uploadUrl: `${baseUrl}/storage/object`, method: "PUT", headers: { "Content-Type": req.body.contentType },
+				uploadToken: "token-1", maxBytes: largeSize,
+			} });
+		});
+		app.put("/storage/object", (req, res) => {
+			calls.push("put");
+			auth = req.headers.authorization;
+			storedType = String(req.headers["content-type"]);
+			storedLength = String(req.headers["content-length"]);
+			req.on("data", (chunk) => { stored += chunk.length; });
+			req.on("end", () => res.status(200).end());
+		});
+		app.post("/api/v1/drive/files/direct-uploads/complete", express.json(), (req, res) => {
+			calls.push(`complete ${JSON.stringify(req.body)}`);
+			res.status(201).json({ id: "file-large" });
+		});
+		let baseUrl = "";
+		const server = await new Promise<import("node:http").Server>((resolveServer) => {
+			const listening = app.listen(0, "127.0.0.1", () => resolveServer(listening));
+		});
+		baseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+		const env = { REPZO_TOKEN: "foxu-test-token", REPZO_BASE_URL: baseUrl };
+		try {
+			const first = await runCli(["drive", "files", "upload", small, "--query", "parentId=folder-1", "--yes"], { env });
+			expect(first.code, first.stderr).toBe(0);
+			expect(calls).toEqual(["multipart /api/v1/drive/files?parentId=folder-1 multipart/form-data"]);
+
+			const noYes = await runCli(["drive", "files", "upload", large], { env });
+			expect(noYes.code).not.toBe(0);
+			const dryRun = await runCli(["drive", "files", "upload", large, "--query", "parentId=folder-1", "--dry-run"], { env });
+			expect(JSON.parse(dryRun.stdout).data).toMatchObject({ dryRun: true, directUpload: true, parentId: "folder-1" });
+			expect(calls).toHaveLength(1);
+
+			const second = await runCli(["drive", "files", "upload", large, "--query", "parentId=folder-1", "--yes"], { env });
+			expect(second.code, second.stderr).toBe(0);
+			expect(JSON.parse(second.stdout).data).toEqual({ id: "file-large" });
+			expect(calls.slice(1)).toEqual([
+				`request ${JSON.stringify({ fileName: "large.pdf", contentType: "application/pdf", size: largeSize, parentId: "folder-1" })}`,
+				"put",
+				`complete ${JSON.stringify({ uploadToken: "token-1", parentId: "folder-1" })}`,
+			]);
+			expect(stored).toBe(largeSize);
+			expect(storedType).toBe("application/pdf");
+			expect(storedLength).toBe(String(largeSize));
+			expect(auth).toBeUndefined();
+		} finally {
+			await new Promise((done) => server.close(done));
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("downloads a Drive file without overwriting or trusting the server's folder", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "repzo-drive-"));
+		const app = express();
+		let name = "report final.pdf";
+		let length: string | undefined;
+		app.get("/api/v1/drive/files/:id/content", (req, res) => {
+			if (req.params.id === "missing") return res.status(404).json({ error: { code: "not_found", message: "File not found." } });
+			expect(req.headers.authorization).toBe("Bearer foxu-test-token");
+			res.set("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(name)}`);
+			res.set("Content-Type", "application/pdf");
+			if (length) {
+				// The connection drops partway through the file.
+				res.set("Content-Length", length);
+				res.write("file bytes", () => res.socket?.destroy());
+				return;
+			}
+			res.end("file bytes");
+		});
+		const server = await new Promise<import("node:http").Server>((resolveServer) => {
+			const listening = app.listen(0, "127.0.0.1", () => resolveServer(listening));
+		});
+		const env = { REPZO_TOKEN: "foxu-test-token", REPZO_BASE_URL: `http://127.0.0.1:${(server.address() as { port: number }).port}` };
+		try {
+			const first = await runCli(["drive", "files", "download", "f-1", "--output", dir], { env });
+			expect(first.code, first.stderr).toBe(0);
+			const saved = join(dir, "report final.pdf");
+			expect(JSON.parse(first.stdout).data).toMatchObject({ path: saved, name: "report final.pdf", size: 10, type: "application/pdf" });
+			expect(await readFile(saved, "utf8")).toBe("file bytes");
+
+			const again = await runCli(["drive", "files", "download", "f-1", "--output", dir], { env });
+			expect(again.code).not.toBe(0);
+			expect(again.stderr + again.stdout).toContain("--force");
+			const forced = await runCli(["drive", "files", "download", "f-1", "--output", dir, "--force"], { env });
+			expect(forced.code, forced.stderr).toBe(0);
+
+			name = "../../escape.txt";
+			const hostile = await runCli(["drive", "files", "download", "f-2", "--output", dir], { env });
+			expect(JSON.parse(hostile.stdout).data.path).toBe(join(dir, "escape.txt"));
+
+			const missing = await runCli(["drive", "files", "download", "missing", "--output", dir], { env });
+			expect(missing.code).not.toBe(0);
+			expect(JSON.parse(missing.stderr || missing.stdout).error).toMatchObject({ code: "not_found", message: "File not found." });
+
+			name = "short.txt";
+			length = "99";
+			const cut = await runCli(["drive", "files", "download", "f-3", "--output", dir, "--no-retry"], { env });
+			expect(cut.code).not.toBe(0);
+			expect((await readdir(dir)).filter((file) => file.includes("short.txt"))).toEqual([]);
+		} finally {
+			await new Promise((done) => server.close(done));
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("discovers AI Visibility commands and previews edits", async () => {

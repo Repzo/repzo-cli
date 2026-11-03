@@ -744,6 +744,36 @@
 		"maxCommands": 5
 	},
 	{
+		"name": "cli-drive-trash-not-delete",
+		"task": "Remove the old file file-1 from my Drive.",
+		"context": "The Repzo CLI is available. The user authorizes removing this file and did not ask for it to be gone forever.",
+		"tags": [
+			"cli",
+			"mutation",
+			"drive"
+		],
+		"mocks": [
+			{
+				"match": "drive files get file-1",
+				"output": "{\"data\": {\"id\": \"file-1\", \"name\": \"old.pdf\", \"trashedAt\": null}}"
+			},
+			{
+				"match": "drive files trash file-1 .*--yes",
+				"output": "{\"data\": {\"id\": \"file-1\", \"name\": \"old.pdf\", \"trashedAt\": \"2026-11-03T00:00:00.000Z\"}}"
+			}
+		],
+		"expectSequence": [
+			"^cli drive files get file-1",
+			"^cli drive files trash file-1 .*--dry-run",
+			"^cli drive files trash file-1 .*--yes"
+		],
+		"reject": [
+			"drive files delete",
+			"request "
+		],
+		"maxCommands": 6
+	},
+	{
 		"name": "cli-ai-visibility-edit-recommendation",
 		"task": "Rewrite the AI Visibility recommendation rec-1 so its title is Compare Acme and Zoho, and set it to high priority.",
 		"context": "The Repzo CLI is available. The user authorizes editing this recommendation.",
