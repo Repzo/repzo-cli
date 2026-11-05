@@ -847,6 +847,53 @@ command(
 	"/voice/analytics",
 	"Get voice analytics.",
 );
+const VOICE_FLOW_LOGIN_GOTCHA = "Needs a browser login (repzo auth login) and the voice_calls.settings permission. API keys can't use call flows. If the scope is missing, log in again.";
+const VOICE_FLOW_REVISION_GOTCHA = "Send the revision from your last read. A 409 means the flow changed since: read it again and redo the change, never guess.";
+const voiceFlowCommand = (verb, method, path, description, options = {}) =>
+	command(["voice", "flows", verb], method, path, description, {
+		...options,
+		gotchas: [...(options.gotchas ?? []), VOICE_FLOW_LOGIN_GOTCHA],
+	});
+voiceFlowCommand("list", "GET", "/voice/flows", "List call flows.", {
+	pagination: "offset",
+	gotchas: ["Filter with --query channelAccountId=ID from voice channels. Returns summaries; use voice flows get for the steps."],
+});
+voiceFlowCommand("get", "GET", "/voice/flows/{id}", "Get a call flow with its published graph and draft.", {
+	args: ["id"],
+	gotchas: ["Edit from draftGraph if it isn't null, otherwise graph. Keep the revision for the next write."],
+});
+voiceFlowCommand("create", "POST", "/voice/flows", "Create an inactive call flow. Changes no calls.", {
+	body: true,
+	gotchas: ["Body: { channelAccountId, name?, draftGraph? }. Without draftGraph it starts from the default flow. Step types, settings and branches are in the skill's call-flows reference. Unknown settings are refused."],
+});
+voiceFlowCommand("update", "PATCH", "/voice/flows/{id}", "Save a call flow's name or draft. Changes no calls.", {
+	args: ["id"],
+	body: true,
+	gotchas: ["Body: { revision, name?, draftGraph? }. draftGraph replaces the whole draft. Saving a draft never goes live; run voice flows validate next.", VOICE_FLOW_REVISION_GOTCHA],
+});
+voiceFlowCommand("validate", "POST", "/voice/flows/{id}/validate", "Check a call flow without saving it.", {
+	args: ["id"],
+	mutation: false,
+	gotchas: ["Checks the saved draft, or the published flow if there's no draft, or { draftGraph } if sent. issues block publishing; warnings don't. isLive true means publishing changes real calls straight away."],
+});
+voiceFlowCommand("publish", "POST", "/voice/flows/{id}/publish", "Publish a call flow's draft. On a live flow, real calls change straight away.", {
+	args: ["id"],
+	body: true,
+	gotchas: ["Body: { revision }. Check isLive from voice flows validate first. If it's true, get the user's explicit go-ahead: real incoming calls change straight away.", VOICE_FLOW_REVISION_GOTCHA],
+});
+voiceFlowCommand("activate", "POST", "/voice/flows/{id}/activate", "Set a call flow live. Real calls on that number run it straight away.", {
+	args: ["id"],
+	body: true,
+	gotchas: ["Body: { revision }. Replaces the line's current live flow, so get the user's explicit go-ahead and name the flow being replaced. Refused with unpublished changes, and for outbound flows.", VOICE_FLOW_REVISION_GOTCHA],
+});
+voiceFlowCommand("discard-draft", "POST", "/voice/flows/{id}/discard-draft", "Discard a call flow's unpublished changes.", {
+	args: ["id"],
+});
+voiceFlowCommand("delete", "DELETE", "/voice/flows/{id}", "Delete a call flow.", {
+	args: ["id"],
+	gotchas: ["A live flow can't be deleted. Set another flow live first."],
+});
+voiceFlowCommand("workflows", "GET", "/voice/flow-workflows", "List workflows a call flow's Run workflow step can start.");
 
 for (const [verb, method] of [
 	["list", "GET"],
