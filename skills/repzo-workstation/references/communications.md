@@ -48,6 +48,8 @@ repzo voice calls place --data @call.json --dry-run
 
 Geo-lock or provider restrictions come from the public API; report them without bypassing them.
 
+To read or change how calls are routed on a number, read [call-flows.md](call-flows.md). Publishing or setting a flow live changes real calls straight away.
+
 ## Repzo Send
 
 Campaign listing, retrieval, deliveries, skip previews, audience estimates, brands, and subscription types are reads. Creating, editing, testing, launching, pausing, approving, and archiving campaigns, transactional/system dispatch, event recording, event type changes, and opt-out are mutations.

@@ -128,6 +128,21 @@ repzo email-templates clone TEMPLATE_ID --data '{"name":"Welcome (copy)"}' --yes
 
 The server builds HTML only for text, heading, button, divider, image, and html blocks, and rejects other block types with 422. Pass the `meta.etag` from `get` as `--if-match` so an edit made in the editor meanwhile is not overwritten. See the [email templates skill reference](skills/repzo-workstation/references/email-templates.md) for a full design and an HTML example.
 
+## Call flows
+
+Build the steps that decide what happens when someone calls a number, the same flows as the web builder:
+
+```bash
+repzo voice channels
+repzo voice flows list --query channelAccountId=CHANNEL_ID
+repzo voice flows create --data @flow.json --dry-run
+repzo voice flows validate FLOW_ID
+repzo voice flows publish FLOW_ID --data '{"revision":"REVISION"}' --dry-run
+repzo voice flows activate FLOW_ID --data '{"revision":"REVISION"}' --dry-run
+```
+
+Creating and editing only save a draft. Publishing a live flow or setting a flow live changes real calls straight away, so both need `--yes`. Call flows need a browser login (`repzo auth login`) and the permission to manage call settings; API keys can't use them.
+
 ## Drive
 
 Work with the files and folders in Drive as yourself. You see and change exactly what you can in the web app:

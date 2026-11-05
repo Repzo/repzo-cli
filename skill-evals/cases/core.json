@@ -376,6 +376,26 @@
 		"maxCommands": 4
 	},
 	{
+		"name": "cli-call-flow-edit-stops-at-draft",
+		"task": "On call flow flow-1, change the ring time on the ring step to 30 seconds. Don't publish it yet.",
+		"context": "The Repzo CLI is available.",
+		"tags": [
+			"cli",
+			"write",
+			"voice"
+		],
+		"accept": [
+			"^cli voice flows get flow-1",
+			"^cli voice flows update flow-1 .*--dry-run",
+			"^cli voice flows update flow-1 .*--yes"
+		],
+		"reject": [
+			"voice flows publish",
+			"voice flows activate"
+		],
+		"maxCommands": 5
+	},
+	{
 		"name": "cli-voice-analytics",
 		"task": "Show voice analytics for August 2026.",
 		"context": "The Repzo CLI is available.",

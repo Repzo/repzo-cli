@@ -350,6 +350,54 @@ describe("Repzo CLI v2", () => {
 		expect(refused.stderr + refused.stdout).toContain("--yes");
 	});
 
+	it("call flows go live only with --yes, and validating doesn't need it", async () => {
+		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
+		for (const [verb, method, path, args, mutation, requiresBody] of [
+			["list", "GET", "/voice/flows", [], false, false],
+			["get", "GET", "/voice/flows/{id}", ["id"], false, false],
+			["create", "POST", "/voice/flows", [], true, true],
+			["update", "PATCH", "/voice/flows/{id}", ["id"], true, true],
+			["validate", "POST", "/voice/flows/{id}/validate", ["id"], false, false],
+			["delete", "DELETE", "/voice/flows/{id}", ["id"], true, false],
+			["publish", "POST", "/voice/flows/{id}/publish", ["id"], true, true],
+			["activate", "POST", "/voice/flows/{id}/activate", ["id"], true, true],
+			["discard-draft", "POST", "/voice/flows/{id}/discard-draft", ["id"], true, false],
+			["workflows", "GET", "/voice/flow-workflows", [], false, false],
+		] as const) {
+			expect(catalog).toContainEqual(expect.objectContaining({ command: `voice flows ${verb}`, method, path, arguments: args, mutation, requiresBody }));
+		}
+		const activate = catalog.find((entry: { command: string }) => entry.command === "voice flows activate");
+		expect(activate.gotchas.join(" ")).toContain("go-ahead");
+
+		const env = { REPZO_TOKEN: "foxu-test-token", REPZO_BASE_URL: "http://127.0.0.1:9" };
+		const body = JSON.stringify({ revision: "2026-11-05T10:00:00.000Z" });
+		for (const verb of ["publish", "activate"]) {
+			const refused = await runCli(["voice", "flows", verb, "f-1", "--data", body], { env });
+			expect(refused.code).not.toBe(0);
+			expect(refused.stderr + refused.stdout).toContain("--yes");
+			const preview = await runCli(["voice", "flows", verb, "f-1", "--data", body, "--dry-run"]);
+			expect(preview.code).toBe(0);
+			expect(JSON.parse(preview.stdout).data).toMatchObject({
+				dryRun: true, method: "POST", body: { revision: "2026-11-05T10:00:00.000Z" }, url: expect.stringContaining(`/api/v1/voice/flows/f-1/${verb}`),
+			});
+		}
+		// A read that happens to be a POST: no --yes, and the body is optional.
+		const app = express();
+		app.post("/api/v1/voice/flows/f-1/validate", (_req, res) => {
+			res.json({ valid: true, isLive: true, issues: [], warnings: [] });
+		});
+		const server = app.listen(0, "127.0.0.1");
+		await new Promise((resolve) => server.once("listening", resolve));
+		try {
+			const port = (server.address() as { port: number }).port;
+			const result = await runCli(["voice", "flows", "validate", "f-1"], { env: { REPZO_TOKEN: "foxu-test-token", REPZO_BASE_URL: `http://127.0.0.1:${port}` } });
+			expect(result.code, result.stderr).toBe(0);
+			expect(JSON.parse(result.stdout).data).toMatchObject({ valid: true, isLive: true });
+		} finally {
+			await new Promise((resolve) => server.close(resolve));
+		}
+	});
+
 	it("uploads small Drive files as multipart and large ones straight to storage", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "repzo-drive-"));
 		const small = join(dir, "small.txt");
