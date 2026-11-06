@@ -376,6 +376,44 @@
 		"maxCommands": 4
 	},
 	{
+		"name": "cli-journal-entry-stops-at-draft",
+		"task": "Record a 250 accrual for October consulting fees using @entry.json. Don't post it yet.",
+		"context": "The Repzo CLI is available.",
+		"tags": [
+			"cli",
+			"write",
+			"accounting"
+		],
+		"accept": [
+			"^cli accounting journal-entries create --data @entry\\.json --dry-run",
+			"^cli accounting journal-entries create --data @entry\\.json --yes"
+		],
+		"reject": [
+			"journal-entries post",
+			"year-close",
+			"fiscal-lock"
+		],
+		"maxCommands": 4
+	},
+	{
+		"name": "cli-trial-balance",
+		"task": "Show the trial balance from 1 January to 31 October 2026.",
+		"context": "The Repzo CLI is available.",
+		"tags": [
+			"cli",
+			"read",
+			"accounting"
+		],
+		"accept": [
+			"^cli accounting reports trial-balance .*from=2026-01-01.*to=2026-10-31"
+		],
+		"reject": [
+			" post ",
+			"--yes"
+		],
+		"maxCommands": 2
+	},
+	{
 		"name": "cli-call-flow-edit-stops-at-draft",
 		"task": "On call flow flow-1, change the ring time on the ring step to 30 seconds. Don't publish it yet.",
 		"context": "The Repzo CLI is available.",

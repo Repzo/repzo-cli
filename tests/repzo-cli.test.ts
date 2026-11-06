@@ -350,6 +350,33 @@ describe("Repzo CLI v2", () => {
 		expect(refused.stderr + refused.stdout).toContain("--yes");
 	});
 
+	it("covers every accounting endpoint, and posting needs --yes", async () => {
+		const { ACCOUNTING_COMMANDS } = await import("../lib/accounting-commands.generated.mjs");
+		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
+		const accounting = catalog.filter((entry: { command: string }) => entry.command.startsWith("accounting "));
+		expect(accounting).toHaveLength(ACCOUNTING_COMMANDS.length);
+		expect(ACCOUNTING_COMMANDS.length).toBeGreaterThanOrEqual(168);
+		expect(new Set(accounting.map((entry: { command: string }) => entry.command)).size).toBe(accounting.length);
+		for (const [command, method, path, mutation] of [
+			["accounting journal-entries post", "POST", "/accounting/journal-entries/{id}/post", true],
+			["accounting journal-entries create", "POST", "/accounting/journal-entries", true],
+			["accounting reports trial-balance", "GET", "/accounting/reports/trial-balance", false],
+			["accounting credit-limits check", "POST", "/accounting/credit-limits/check", false],
+			["accounting year-close close", "POST", "/accounting/year-close", true],
+			["accounting bills payments create", "POST", "/accounting/bills/{id}/payments", true],
+		] as const) {
+			expect(accounting).toContainEqual(expect.objectContaining({ command, method, path, mutation }));
+		}
+		const env = { REPZO_TOKEN: "foxu-test-token", REPZO_BASE_URL: "http://127.0.0.1:9" };
+		const refused = await runCli(["accounting", "journal-entries", "post", "je-1"], { env });
+		expect(refused.code).not.toBe(0);
+		expect(refused.stderr + refused.stdout).toContain("--yes");
+		const preview = await runCli(["accounting", "journal-entries", "post", "je-1", "--query", "entityId=ent-1", "--dry-run"]);
+		expect(JSON.parse(preview.stdout).data).toMatchObject({ dryRun: true, method: "POST", url: expect.stringContaining("/api/v1/accounting/journal-entries/je-1/post?entityId=ent-1") });
+		expect(catalog).toContainEqual(expect.objectContaining({ command: "invoices returns create", method: "POST", path: "/invoices/{id}/returns", mutation: true }));
+		expect(catalog).toContainEqual(expect.objectContaining({ command: "invoices pdf", method: "GET", path: "/invoices/{id}/pdf", mutation: false }));
+	});
+
 	it("call flows go live only with --yes, and validating doesn't need it", async () => {
 		const catalog = JSON.parse((await runCli(["commands", "--json"])).stdout).data.commands;
 		for (const [verb, method, path, args, mutation, requiresBody] of [
