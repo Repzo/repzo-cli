@@ -913,6 +913,7 @@ for (const item of ACCOUNTING_COMMANDS) {
 		...(item.args.length ? { args: item.args } : {}),
 		...(item.body ? { body: true } : {}),
 		...(item.pagination ? { pagination: item.pagination } : {}),
+		...(item.download ? { download: true } : {}),
 		mutation: item.mutation,
 		gotchas: [...item.gotchas, ACCOUNTING_GOTCHA],
 	});

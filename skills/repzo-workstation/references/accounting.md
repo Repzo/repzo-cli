@@ -54,11 +54,13 @@ repzo accounting payment-entries create --data @receipt.json --dry-run
 repzo accounting payment-entries post PAYMENT_ENTRY_ID --dry-run
 ```
 
-Credit note and invoice PDF (these live under `repzo invoices`, with the rest of invoicing):
+Credit note and invoice PDF. Use `repzo invoices …` with CRM invoice permissions, or the `repzo accounting invoices …` twins when the person works on invoices through Accounting (Sales) instead. If one gives 403, try the other:
 
 ```bash
 repzo invoices returns create INVOICE_ID --data '{"reason":"Damaged","items":[{"invoiceItemId":"ITEM_ID","quantity":2}]}' --dry-run
 repzo invoices pdf INVOICE_ID --output ./invoices
+repzo accounting invoices returns create INVOICE_ID --data '{"reason":"Damaged"}' --dry-run
+repzo accounting invoices pdf INVOICE_ID --output ./invoices
 ```
 
 Reports take dates in `YYYY-MM-DD`. Range reports need `from` and `to`; as-of reports take `asOf` (today by default). Add `--query currency=EUR` to see amounts converted from the base currency:
@@ -88,7 +90,7 @@ Run `repzo commands --json` for each command's arguments, body and notes. The fa
 | `parties` | get | settings update |
 | `credit-limits` | check | none |
 | `payment-terms` | list | create, set-default, set-party-default, update, archive |
-| `invoices` | entries | write-off, reverse-write-off |
+| `invoices` | entries, pdf | write-off, reverse-write-off, returns create |
 | `credit-applications` | list, party | create, cancel |
 | `payment-entries` | list, open-items, get | create, update, post, apply-advance, cancel, delete |
 | `bills` | list, get | create, update, post, cancel, delete, payments create, payments delete |
@@ -124,6 +126,7 @@ Run `repzo commands --json` for each command's arguments, body and notes. The fa
 - `bank rules update` replaces the whole rule: anything left out goes back to its default.
 - Supplier custom properties go in `customProperties`, keyed by property name, like on other records. `metadata properties supplier` lists them and says which are required.
 - `journal-entries list` refuses a `status`, `sourceType` or `kind` it doesn't know, so a typo can't quietly return every entry.
+- `--query sort=FIELD` (or `-FIELD` for descending) only takes the fields each list names in its help. Anything else gets 422.
 - A supplier on a payment hold blocks bill payments and posting an expense paid to them. The draft expense saves fine.
 - Deleting a draft landed cost hides it but keeps it for history, so its number stays used. Cancelling a draft prepaid expense keeps it as cancelled and frees its journal line for a new schedule. Deleted draft bills and expenses are removed for good.
 - `members access get` and `members access set` need someone who works across all companies. A user limited to some companies gets 403.
