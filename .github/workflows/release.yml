@@ -30,7 +30,7 @@ jobs:
 
   build:
     needs: test
-    runs-on: ${{ startsWith(matrix.target, 'bun-darwin-') && 'macos-14' || 'ubuntu-latest' }}
+    runs-on: ${{ startsWith(matrix.target, 'bun-darwin-') && 'macos-15' || 'ubuntu-latest' }}
     timeout-minutes: 25
     permissions:
       contents: read
@@ -119,7 +119,7 @@ jobs:
           - os: ubuntu-latest
             platform: linux_x64
             extension: ""
-          - os: macos-14
+          - os: macos-15
             platform: darwin_arm64
             extension: ""
           - os: windows-latest
