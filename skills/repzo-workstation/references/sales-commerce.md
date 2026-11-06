@@ -54,6 +54,8 @@ repzo price-offers items replace PRICE_OFFER_ID --data @offer-items.json --yes -
 
 Never send only one changed line unless the intended result is to remove all other lines.
 
+For the ledger side of sales and purchases (journal entries, bills, payments, credit notes, reports), read [accounting.md](accounting.md).
+
 Invoice opening and voiding are guarded workflows, not ordinary status patches. Opening validates required tax data and may schedule fiscal submission; voiding performs the configured reversal work.
 
 ```bash

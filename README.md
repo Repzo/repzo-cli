@@ -128,6 +128,21 @@ repzo email-templates clone TEMPLATE_ID --data '{"name":"Welcome (copy)"}' --yes
 
 The server builds HTML only for text, heading, button, divider, image, and html blocks, and rejects other block types with 422. Pass the `meta.etag` from `get` as `--if-match` so an edit made in the editor meanwhile is not overwritten. See the [email templates skill reference](skills/repzo-workstation/references/email-templates.md) for a full design and an HTML example.
 
+## Accounting
+
+Everything in the Accounting workspace, with the same permissions and rules:
+
+```bash
+repzo accounting access
+repzo accounting reports trial-balance --query from=2026-01-01 --query to=2026-10-31
+repzo accounting journal-entries create --data @entry.json --dry-run
+repzo accounting journal-entries post ENTRY_ID --yes
+repzo accounting bills list --query status=open
+repzo invoices returns create INVOICE_ID --data '{"reason":"Damaged"}' --dry-run
+```
+
+Creating or editing a document saves a draft. Posting, cancelling, reversing and closing change the books and need `--yes`. Add `--query entityId=ID` to work in a legal entity other than your default. Accounting needs a browser login (`repzo auth login`) and Accounting access; API keys can't use it.
+
 ## Call flows
 
 Build the steps that decide what happens when someone calls a number, the same flows as the web builder:

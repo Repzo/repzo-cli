@@ -26,6 +26,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { EMBEDDED_SKILLS } from "../lib/embedded-skill.generated.mjs";
+import { ACCOUNTING_COMMANDS } from "../lib/accounting-commands.generated.mjs";
 import { setMacOSKeychainCredential } from "../lib/macos-keychain.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -370,6 +371,16 @@ command(["price-offers", "items", "list"], "GET", "/price-offers/{id}/items", "L
 command(["price-offers", "items", "replace"], "PUT", "/price-offers/{id}/items", "Atomically replace price offer line items and recalculate totals.", { args: ["id"], body: true });
 command(["invoices", "open"], "POST", "/invoices/{id}/open", "Open a draft invoice through its guarded workflow.", { args: ["id"] });
 command(["invoices", "void"], "POST", "/invoices/{id}/void", "Void an invoice through its guarded workflow.", { args: ["id"] });
+command(["invoices", "returns", "create"], "POST", "/invoices/{id}/returns", "Create a credit note for an invoice.", {
+	args: ["id"],
+	body: true,
+	gotchas: ["Body: { reason, items?: [{ invoiceItemId, quantity }] }. Leave items out to credit the whole invoice. The credit note is created open and reverses the revenue, tax and stock of what came back."],
+});
+command(["invoices", "pdf"], "GET", "/invoices/{id}/pdf", "Download an invoice as a PDF.", {
+	args: ["id"],
+	download: true,
+	gotchas: ["--output PATH sets where it goes; default is the invoice's file name in the current folder. --query templateId=ID picks a print template; --query original=true ignores this invoice's customizations."],
+});
 
 command(["pipelines", "list"], "GET", "/pipelines", "List pipelines.", {
 	pagination: "offset",
@@ -894,6 +905,18 @@ voiceFlowCommand("delete", "DELETE", "/voice/flows/{id}", "Delete a call flow.",
 	gotchas: ["A live flow can't be deleted. Set another flow live first."],
 });
 voiceFlowCommand("workflows", "GET", "/voice/flow-workflows", "List workflows a call flow's Run workflow step can start.");
+
+// Generated from the public Accounting API in repzo-crm (scripts/generate-cli-accounting-commands.ts).
+const ACCOUNTING_GOTCHA = "Needs a browser login (repzo auth login) and Accounting access. Add --query entityId=ID to work in a legal entity other than your default.";
+for (const item of ACCOUNTING_COMMANDS) {
+	command(item.tokens, item.method, item.path, item.description, {
+		...(item.args.length ? { args: item.args } : {}),
+		...(item.body ? { body: true } : {}),
+		...(item.pagination ? { pagination: item.pagination } : {}),
+		mutation: item.mutation,
+		gotchas: [...item.gotchas, ACCOUNTING_GOTCHA],
+	});
+}
 
 for (const [verb, method] of [
 	["list", "GET"],
