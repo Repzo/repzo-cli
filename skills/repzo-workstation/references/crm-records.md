@@ -61,6 +61,24 @@ repzo lead-sources delete OLD_SOURCE_ID --query replaceWithId=NEW_SOURCE_ID --dr
 repzo industries delete OLD_INDUSTRY_ID --query replaceWithId=NEW_INDUSTRY_ID --dry-run
 ```
 
+## Property definitions
+
+Records take custom values by name in `customProperties`; these commands manage the definitions themselves (scope `custom_fields`). Objects: `contact`, `account`, `deal`, `ticket`, `invoice`, and the others listed by `metadata properties`.
+
+| Command family | Read | Change |
+|---|---|---|
+| `properties` | list, get, usage, data-quality, groups list, logic list, logic get, formula sources, formula test | create, update, delete, reorder, groups create/update/delete, logic create/update/delete |
+
+```bash
+repzo properties list contact --query system=false
+repzo properties create contact --data '{"fieldName":"customer_tier","fieldType":"select","label":"Customer tier","options":[{"value":"gold","label":"Gold"},{"value":"silver","label":"Silver"}]}' --dry-run
+repzo properties update contact customer_tier --data '{"archived":true}' --dry-run
+```
+
+- A property is addressed by its key (`fieldName`), which never changes. System properties take only the settings the app allows (label, required, …).
+- A property that holds values, or that a rule or formula uses, can't be deleted (409): archive it instead (`archived: true`). Its type can't change while records hold values, and a dropdown option records use can't be removed.
+- `formula test` evaluates a formula without saving anything.
+
 ## Tags
 
 List tag definitions before assigning them. Entity tag replacement is replace-all, so read existing assignments and preserve any tags that should remain.

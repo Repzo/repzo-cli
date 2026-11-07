@@ -23,6 +23,18 @@ Report execution uses POST because its validated query is too structured for a q
 
 Do not reconstruct analytics by downloading all CRM records when the reports API supports the calculation. On validation errors, inspect `details`, saved report configuration, categories, filter values, and OpenAPI rather than changing field names speculatively.
 
+## KPI goals
+
+| Command family | Read | Change |
+|---|---|---|
+| `kpi-definitions` | list, get, goal-counts | create, update, delete, preview-impact |
+| `kpi-goals` | list, get, my, dashboard, leaderboard, report, report drilldown, snapshots | create, update, delete, recalculate |
+| `kpi-goal-groups` | list, get, breakdown | create, update, delete |
+
+- Needs the KPI Plus plan module (except `kpi-goals my`). Goals follow data visibility: a member sees their own and their team's goals.
+- A definition that goals use can't be deleted unless you say what happens to them: `--query goalAction=delete_all` or `delete_active` (409 otherwise). `preview-impact` shows what a definition change would do before you make it.
+- Assignees must be members or teams of this workspace. Goals inside a goal group are changed through the group, not one by one.
+
 ## Imports
 
 Imports are a guarded multi-step workflow: upload, create mappings, validate without writing records, then start only after validation is acceptable. Preview every mutating step.
