@@ -40,6 +40,17 @@ The lists behind the ticket and appointment screens, each with its own scope and
 
 Colours are hex (`#3B82F6`). Changing any of these lists is a settings change for everyone: confirm first.
 
+## Automation workflows
+
+| Command family | Read | Change |
+|---|---|---|
+| `automation-workflows` | list, get, versions | create, update, canvas, duplicate, delete, publish, pause, resume, versions restore |
+| `automation-executions` | list, get | cancel |
+
+- `create` and `canvas` only ever save a **draft**; nothing runs until `publish`. Only the published version runs, so editing a live workflow changes nothing until you publish again. Publishing, pausing, resuming and cancelling a run change live behavior: confirm first.
+- `canvas` replaces all nodes and edges. Steps and settings must be ones the builder knows (unknown types or settings get 422); records a step names (pipelines, users, tags, templates) must belong to the workspace.
+- Testing a single step isn't available from the CLI, because it can send real messages.
+
 ## Request types and requests
 
 Read the request type before creating a request so the submitted fields match its definition.
