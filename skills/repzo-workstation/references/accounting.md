@@ -72,6 +72,34 @@ repzo accounting reports general-ledger --query from=2026-10-01 --query to=2026-
 repzo accounting reports consolidated trial-balance --query groupId=GROUP_ID --query from=2026-01-01 --query to=2026-10-31
 ```
 
+## Settings the books use
+
+These live outside `repzo accounting` because they're workspace settings with their own scopes and permissions, the same as their Settings screens:
+
+| Command family | Read | Change | What the books use it for |
+|---|---|---|---|
+| `locations` | list, get, settings get | create, update, delete, settings update | Where stock is kept. `accountingEntityId` shows the company it belongs to; Accounting sets it, so it can't be written |
+| `tax-rates` | list, get | create, update, delete | Tax on lines. Map each rate to its tax account with `accounting mappings update` |
+| `product-categories` | list, get | create, update, delete, reorder | Category default accounts (`accounting product-account-defaults`) |
+| `price-lists` | list, get, items list | create, update, delete, items set, items remove | Prices in a currency |
+| `currencies` | list, get, rates list, exchange-rate | create, update, delete, rates set | Exchange rates for documents, reports and revaluation |
+| `payment-methods` | list, get, preferences get | create, update, delete, preferences set | A custom method's `category` decides how payments post; map `custom:<id>` to an account in `accounting mappings update` |
+
+```bash
+repzo locations create --data '{"name":"Riyadh warehouse","country":"SA","timezone":"Asia/Riyadh"}' --dry-run
+repzo tax-rates create --data '{"name":"VAT 15%","rate":15}' --dry-run
+repzo currencies create --data '{"currencyCode":"EUR","currencyName":"Euro","currencySymbol":"€","exchangeRateToBase":4.1}' --dry-run
+repzo currencies rates set EUR --data '{"rate":4.05,"effectiveDate":"2026-10-31"}' --dry-run
+repzo currencies exchange-rate --query currency=EUR --query date=2026-11-01
+repzo price-lists items set PRICE_LIST_ID --data '{"productId":"PRODUCT_ID","unitPrice":12.5}' --dry-run
+repzo accounting products stock --query ids=PRODUCT_ID,PRODUCT_ID
+```
+
+- A tax rate that's on any document, product, line item, membership plan or location setting can't be deleted (409). Rename it, or move those records to another rate.
+- A location that still has stock on hand can't be deleted (409). Transfer or adjust the stock to zero first.
+- `currencies rates set` records a rate for one date without changing today's rate. `currencies update` with `exchangeRateToBase` changes today's rate. The base currency's rate is always 1, and the base can't change once Accounting has been turned on.
+- A price list's currency, and any price's currency, must be one of the workspace's active currencies.
+
 ## Every command
 
 Run `repzo commands --json` for each command's arguments, body and notes. The families:
@@ -109,6 +137,7 @@ Run `repzo commands --json` for each command's arguments, body and notes. The fa
 | `year-close` | status | close, cancel |
 | `opening-balances` | status | targets replace, documents preview, documents bring-in, complete, reopen, stock create |
 | `document-sequences` | list | update |
+| `products` | stock, summary | none |
 | `product-account-defaults` | resolve, get | update |
 | `entities` | list | create, update, members list, members set |
 | `members` | none | access get, access set |

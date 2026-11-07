@@ -963,5 +963,41 @@
 			"--profile default"
 		],
 		"maxCommands": 3
+	},
+	{
+		"name": "settings-create-location",
+		"task": "Add a new warehouse location called Jeddah warehouse in Saudi Arabia.",
+		"context": "The CLI is available and signed in. The change is authorized.",
+		"tags": [
+			"cli",
+			"write",
+			"accounting"
+		],
+		"accept": [
+			"locations create .*Jeddah warehouse"
+		],
+		"reject": [
+			"request (POST|post) /api/inventory/locations",
+			"metadata locations create",
+			"accounting locations"
+		],
+		"maxCommands": 3
+	},
+	{
+		"name": "settings-dated-exchange-rate",
+		"task": "Record that 1 EUR was worth 4.05 of our base currency on 2026-10-31, without changing today's rate.",
+		"context": "The CLI is available and signed in. EUR is already a workspace currency. The change is authorized.",
+		"tags": [
+			"cli",
+			"write",
+			"accounting"
+		],
+		"accept": [
+			"currencies rates set EUR .*4\\.05.*2026-10-31|currencies rates set EUR .*2026-10-31.*4\\.05"
+		],
+		"reject": [
+			"currencies update EUR"
+		],
+		"maxCommands": 3
 	}
 ]

@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { EMBEDDED_SKILLS } from "../lib/embedded-skill.generated.mjs";
 import { ACCOUNTING_COMMANDS } from "../lib/accounting-commands.generated.mjs";
+import { SETTINGS_COMMANDS } from "../lib/settings-commands.generated.mjs";
 import { setMacOSKeychainCredential } from "../lib/macos-keychain.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -916,6 +917,19 @@ for (const item of ACCOUNTING_COMMANDS) {
 		...(item.download ? { download: true } : {}),
 		mutation: item.mutation,
 		gotchas: [...item.gotchas, ACCOUNTING_GOTCHA],
+	});
+}
+
+// Workspace settings the books depend on (locations, tax rates, product
+// categories, price lists, currencies, payment methods), generated from the
+// public API in repzo-crm (scripts/generate-cli-accounting-commands.ts).
+for (const item of SETTINGS_COMMANDS) {
+	command(item.tokens, item.method, item.path, item.description, {
+		...(item.args.length ? { args: item.args } : {}),
+		...(item.body ? { body: true } : {}),
+		...(item.pagination ? { pagination: item.pagination } : {}),
+		mutation: item.mutation,
+		...(item.gotchas.length ? { gotchas: item.gotchas } : {}),
 	});
 }
 
