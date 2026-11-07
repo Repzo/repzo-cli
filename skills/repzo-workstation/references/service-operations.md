@@ -23,6 +23,23 @@ repzo projects update PROJECT_ID --data @project-change.json --dry-run
 repzo appointments update APPOINTMENT_ID --data @appointment-change.json --dry-run
 ```
 
+## Helpdesk and appointment settings
+
+The lists behind the ticket and appointment screens, each with its own scope and the same permissions as its Settings page:
+
+| Command family | Read | Change | Notes |
+|---|---|---|---|
+| `ticket-categories` | list, get | create, update, delete | Can nest with `parentId`. One with subcategories can't be deleted |
+| `pending-reasons` | list, get | create, update, delete | Built-in (`isSystem`) reasons can't be changed. One a live ticket uses can't be deleted |
+| `canned-responses` | list, get | create, update, delete | Shared ones plus your own; other people's personal replies stay hidden |
+| `sla-policies` | list, get | create, update, delete, reorder | Targets per priority, in whole hours/minutes/seconds; conditions use the builder's fields only. Order decides which policy applies |
+| `appointment-statuses` | list, get | create, update, delete | Built-in statuses (with a `systemCode`) drive completion and reviews; they can't be changed or deleted |
+| `cancellation-reasons` | list, get | create, update, delete | Switch a used reason off instead of deleting it (409) |
+| `block-time-types` | list, get | create, update, delete | One that blocked times use can't be deleted |
+| `resource-types` | list, get | create, update, delete | Bookable rooms and equipment types |
+
+Colours are hex (`#3B82F6`). Changing any of these lists is a settings change for everyone: confirm first.
+
 ## Request types and requests
 
 Read the request type before creating a request so the submitted fields match its definition.

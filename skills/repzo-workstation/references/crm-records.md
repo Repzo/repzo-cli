@@ -46,6 +46,21 @@ repzo deals update DEAL_ID --data @deal-change.json --yes
 
 After execution, run the matching `get` command. Do not reuse a stale read as verification.
 
+## Picklists and teams
+
+| Command family | Read | Change | Notes |
+|---|---|---|---|
+| `lead-sources` | list, get, channels list, channels get | create, update, delete, channels add, channels update, channels remove | Where a contact came from. Channels live inside a source (`sourceId`/`channelId` on contacts) |
+| `industries` | list, get | create, delete | The industry picklist on accounts and contacts |
+| `departments` | list, get | create, update, move, reorder, delete | Teams decide department data visibility, so moving or deleting one changes who sees what. Confirm first |
+
+A lead source, channel or industry that contacts, accounts, campaigns or lead form mappings still use can't be deleted on its own: the delete answers 409 with `code: picklist_in_use` and `usage` counts. Add `--query replaceWithId=OTHER_ID` to move those records to another value first (a channel only to another channel of the same source; a source's channels move with it). Up to 500 records move at once (204); more move in the background (202, and the old value disappears when done). Confirm the replacement with the person first.
+
+```bash
+repzo lead-sources delete OLD_SOURCE_ID --query replaceWithId=NEW_SOURCE_ID --dry-run
+repzo industries delete OLD_INDUSTRY_ID --query replaceWithId=NEW_INDUSTRY_ID --dry-run
+```
+
 ## Tags
 
 List tag definitions before assigning them. Entity tag replacement is replace-all, so read existing assignments and preserve any tags that should remain.
