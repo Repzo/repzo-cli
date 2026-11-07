@@ -84,6 +84,9 @@ These live outside `repzo accounting` because they're workspace settings with th
 | `price-lists` | list, get, items list | create, update, delete, items set, items remove | Prices in a currency |
 | `currencies` | list, get, rates list, exchange-rate | create, update, delete, rates set | Exchange rates for documents, reports and revaluation |
 | `payment-methods` | list, get, preferences get | create, update, delete, preferences set | A custom method's `category` decides how payments post; map `custom:<id>` to an account in `accounting mappings update` |
+| `inventory` | items list, levels list, transactions list, transfers list | adjustments create, transfers create, levels low-stock, levels retail-price | Stock and its value. Adjustments and transfers **post immediately**; there's no draft |
+| `product-suppliers` | list, get | create, update, delete | The same suppliers as `accounting suppliers`, without the accounting fields (holds, tax ID, bank details, default accounts). Use `accounting suppliers` for those |
+| `product-brands` | list, get | create, update, delete | Grouping products |
 
 ```bash
 repzo locations create --data '{"name":"Riyadh warehouse","country":"SA","timezone":"Asia/Riyadh"}' --dry-run
@@ -93,10 +96,14 @@ repzo currencies rates set EUR --data '{"rate":4.05,"effectiveDate":"2026-10-31"
 repzo currencies exchange-rate --query currency=EUR --query date=2026-11-01
 repzo price-lists items set PRICE_LIST_ID --data '{"productId":"PRODUCT_ID","unitPrice":12.5}' --dry-run
 repzo accounting products stock --query ids=PRODUCT_ID,PRODUCT_ID
+repzo inventory adjustments create --data '{"locationId":"LOCATION_ID","reason":"receive_items","items":[{"inventoryItemId":"ITEM_ID","quantity":10,"unitCost":4}]}' --dry-run
+repzo inventory transfers create --data '{"sourceLocationId":"FROM_ID","destinationLocationId":"TO_ID","items":[{"inventoryItemId":"ITEM_ID","quantity":3}]}' --dry-run
 ```
 
 - A tax rate that's on any document, product, line item, membership plan or location setting can't be deleted (409). Rename it, or move those records to another rate.
 - A location that still has stock on hand can't be deleted (409). Transfer or adjust the stock to zero first.
+- `inventory adjustments create` posts to the books at once: `receive_items` at `unitCost`, `inventory_count` (send `countedQuantity`), `loss`, `damage`, `correction` and `internal_use` at average cost. Opening stock goes through `accounting opening-balances stock create`, never here. Confirm before posting.
+- A supplier or brand still used by products or documents can't be deleted (409). Mark it inactive instead.
 - `currencies rates set` records a rate for one date without changing today's rate. `currencies update` with `exchangeRateToBase` changes today's rate. The base currency's rate is always 1, and the base can't change once Accounting has been turned on.
 - A price list's currency, and any price's currency, must be one of the workspace's active currencies.
 
