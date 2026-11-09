@@ -35,6 +35,20 @@ Do not reconstruct analytics by downloading all CRM records when the reports API
 - A definition that goals use can't be deleted unless you say what happens to them: `--query goalAction=delete_all` or `delete_active` (409 otherwise). `preview-impact` shows what a definition change would do before you make it.
 - Assignees must be members or teams of this workspace. Goals inside a goal group are changed through the group, not one by one.
 
+## Commissions
+
+| Command family | Read | Change |
+|---|---|---|
+| `commission-plans` | list, get | create, update, delete, recalculate |
+| `commission-statements` | list, get | approve, pay, void, reopen, adjust |
+
+- Needs the KPI Plus plan module. A plan pays on the records one goal counts, so create the goal first (`repzo kpi-goal-groups create`) and pass its id as `sourceGoalId`.
+- Statements go open or pending, then approved, then paid. A statement can be approved only after its period has ended, and `pay` records a payment without sending any money.
+- Non-approvers see only their own statements and those in their KPI Goals data visibility.
+- `update` sends the whole plan. Leaving out `isActive` keeps it as it is. Saving recalculates open and pending statements and drops those the new dates no longer cover; approved and paid ones keep their amounts.
+- `adjust` replaces any earlier adjustment, and `--data '{"adjustment":0}'` removes it. Use a negative amount to take back commission on a refunded deal.
+- In a rate card, name custom properties as `customProperties.<key>`. Amounts must be JSON numbers and dates must be `YYYY-MM-DD`.
+
 ## Imports
 
 Imports are a guarded multi-step workflow: upload, create mappings, validate without writing records, then start only after validation is acceptable. Preview every mutating step.

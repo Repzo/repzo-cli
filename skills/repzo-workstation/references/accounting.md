@@ -82,6 +82,9 @@ These live outside `repzo accounting` because they're workspace settings with th
 | `tax-rates` | list, get | create, update, delete | Tax on lines. Map each rate to its tax account with `accounting mappings update` |
 | `product-categories` | list, get | create, update, delete, reorder | Category default accounts (`accounting product-account-defaults`) |
 | `price-lists` | list, get, items list | create, update, delete, items set, items remove | Prices in a currency |
+| `units-of-measure` | list, get | create, update, delete | The catalog of units products can be sold in |
+| `unit-groups` | list, get | create, update, delete | Named sets of units; a product joins one with `unitGroupId` on `products units set` |
+| `products units`, `products barcodes` | units get, barcodes lookup (`--query code=...`) | units set (replaces all of a product's units) | A product's units, and finding one by barcode |
 | `currencies` | list, get, rates list, exchange-rate | create, update, delete, rates set | Exchange rates for documents, reports and revaluation |
 | `payment-methods` | list, get, preferences get | create, update, delete, preferences set | A custom method's `category` decides how payments post; map `custom:<id>` to an account in `accounting mappings update` |
 | `inventory` | items list, levels list, transactions list, transfers list | adjustments create, transfers create, levels low-stock, levels retail-price | Stock and its value. Adjustments and transfers **post immediately**; there's no draft |
