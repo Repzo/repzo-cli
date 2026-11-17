@@ -119,6 +119,7 @@ Run `repzo commands --json` for each command's arguments, body and notes. The fa
 | `access` | (no action) | none |
 | `settings` | get | update |
 | `setup-defaults` | (no action) | none |
+| `vat-basis` | get | change, remove-change, set-filing-frequency |
 | `mappings` | get | update |
 | `accounts` | list, get, balance | create, update, delete |
 | `journal-entries` | list, get | create, update, delete, post, reverse |
@@ -153,7 +154,7 @@ Run `repzo commands --json` for each command's arguments, body and notes. The fa
 | `members` | none | access get, access set |
 | `intercompany` | get | relationships create, relationships update |
 | `eliminations` | list | create, update, post, reverse |
-| `reports` | balance-sheet, trial-balance, profit-and-loss, cash-flow, vat-return, ar-aging, ap-aging, general-ledger, stock-ledger, statement, statement-customers, open-items, consolidated trial-balance, consolidated balance-sheet, consolidated cash-flow, consolidated profit-and-loss | none |
+| `reports` | balance-sheet, trial-balance, profit-and-loss, cash-flow, vat-return, vat-return documents, ar-aging, ap-aging, general-ledger, stock-ledger, statement, statement-customers, open-items, consolidated trial-balance, consolidated balance-sheet, consolidated cash-flow, consolidated profit-and-loss | none |
 
 ## Things that surprise people
 
@@ -171,4 +172,5 @@ Run `repzo commands --json` for each command's arguments, body and notes. The fa
 - `members access get` and `members access set` need someone who works across all companies. A user limited to some companies gets 403.
 - `bills payments delete` needs the bill the payment belongs to. Another bill's id gives 404.
 - Customers are CRM accounts (companies or individuals). Make a contact an individual customer with `customers create-individual`.
+- `vat-basis` is the Saudi VAT (ZATCA) basis: `invoice` (accrual, the default) or `cash` (VAT counts when paid). Run `vat-basis get` before `vat-basis change`: the start date must be the first day of the tax period after ZATCA's approval, and a voluntary return to invoice basis needs 2 years on cash. It changes only the VAT return, never invoices or the ledger. `reports vat-return documents` lists the paid documents behind a cash-basis return.
 - Listing fiscal years creates the standard years if they're missing, and reading the intercompany setup can add missing system accounts. Both are expected.
